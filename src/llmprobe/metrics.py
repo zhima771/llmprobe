@@ -4,7 +4,13 @@ import math
 import statistics
 from collections import Counter
 
-from llmprobe.models import Cell, CellSummary, LatencyStats, RequestResult
+from llmprobe.models import (
+    Cell,
+    CellSummary,
+    LatencyStats,
+    RequestResult,
+    SpecDecodeMetrics,
+)
 
 
 def percentile(values: list[float], p: float) -> float | None:
@@ -54,7 +60,12 @@ def _peak_concurrency(results: list[RequestResult]) -> int:
 
 
 def summarize_results(
-    results: list[RequestResult], cell: Cell, target: str, repeat: int
+    results: list[RequestResult],
+    cell: Cell,
+    target: str,
+    repeat: int,
+    *,
+    spec_decode: SpecDecodeMetrics | None = None,
 ) -> CellSummary:
     successful = [result for result in results if result.success]
     failed = len(results) - len(successful)
@@ -129,4 +140,5 @@ def summarize_results(
         output_tokens_mean=statistics.fmean(output_values) if output_values else None,
         peak_concurrency=_peak_concurrency(results),
         token_sources=dict(token_sources),
+        spec_decode=spec_decode,
     )

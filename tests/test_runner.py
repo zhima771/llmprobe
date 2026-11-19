@@ -1,5 +1,6 @@
 import asyncio
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from llmprobe.config import (
 )
 from llmprobe.models import Cell, GeneratedPrompt, RequestResult
 from llmprobe.runner import BenchmarkRunner, NullProgress, preflight_workload
+from llmprobe.vllm_metrics import SpecDecodeSnapshot, VLLMMetricsError
 
 
 class FakeClient:
@@ -182,6 +184,130 @@ def test_runner_executes_probe_warmup_and_measurement_order(
         "a": True,
         "b": True,
     }
+
+
+def test_runner_collects_spec_decode_metrics_around_formal_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    metric_calls = 0
+
+    async def fake_probe(
+        client: Any,
+        target: TargetConfig,
+        prompt: GeneratedPrompt,
+        **kwargs: Any,
+    ) -> tuple[bool, RequestResult]:
+        calls.append(f"probe:{target.name}")
+        return True, make_result(target.name, kwargs["cell"], -1, 0)
+
+    async def fake_request(
+        client: Any,
+        target: TargetConfig,
+        prompt: GeneratedPrompt,
+        **kwargs: Any,
+    ) -> RequestResult:
+        phase = "warmup" if kwargs["repeat"] == -1 else "measure"
+        calls.append(f"{phase}:{target.name}")
+        return make_result(target.name, kwargs["cell"], kwargs["repeat"], kwargs["request_index"])
+
+    async def fake_metrics(*args: Any, **kwargs: Any) -> SpecDecodeSnapshot:
+        nonlocal metric_calls
+        metric_calls += 1
+        calls.append("metrics")
+        if metric_calls % 2 == 1:
+            return SpecDecodeSnapshot(
+                found=True,
+                drafts=10,
+                draft_tokens=50,
+                accepted_tokens=20,
+                accepted_tokens_per_pos={0: 8, 1: 3},
+            )
+        return SpecDecodeSnapshot(
+            found=True,
+            drafts=20,
+            draft_tokens=100,
+            accepted_tokens=33,
+            accepted_tokens_per_pos={0: 16, 1: 8},
+        )
+
+    monkeypatch.setattr("llmprobe.runner.probe_usage", fake_probe)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.fetch_spec_decode_snapshot", fake_metrics)
+    cfg = config(tmp_path, warmup_requests=1, requests_per_cell=1)
+    cfg = replace(
+        cfg,
+        targets=(
+            replace(cfg.targets[0], metrics_url="http://a/metrics"),
+            cfg.targets[1],
+        ),
+    )
+    runner = BenchmarkRunner(cfg, progress=NullProgress(), environ={})
+    result = asyncio.run(runner.run())
+
+    assert calls == [
+        "probe:a",
+        "probe:b",
+        "warmup:a",
+        "warmup:b",
+        "metrics",
+        "measure:a",
+        "metrics",
+        "measure:b",
+    ]
+    by_target = {summary.target: summary for summary in result.summaries}
+    spec_decode = by_target["a"].spec_decode
+    assert spec_decode is not None
+    assert spec_decode.available is True
+    assert spec_decode.drafts == 10
+    assert spec_decode.acceptance_rate == pytest.approx(0.26)
+    assert spec_decode.mean_acceptance_length == pytest.approx(2.3)
+    assert spec_decode.per_position_acceptance_rate == pytest.approx((0.8, 0.5))
+    assert by_target["b"].spec_decode is None
+
+
+def test_metrics_failure_does_not_fail_the_benchmark(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_probe(
+        client: Any,
+        target: TargetConfig,
+        prompt: GeneratedPrompt,
+        **kwargs: Any,
+    ) -> tuple[bool, RequestResult]:
+        return True, make_result(target.name, kwargs["cell"], -1, 0)
+
+    async def fake_request(
+        client: Any,
+        target: TargetConfig,
+        prompt: GeneratedPrompt,
+        **kwargs: Any,
+    ) -> RequestResult:
+        return make_result(
+            target.name, kwargs["cell"], kwargs["repeat"], kwargs["request_index"]
+        )
+
+    async def failed_metrics(*args: Any, **kwargs: Any) -> SpecDecodeSnapshot:
+        raise VLLMMetricsError("metrics endpoint returned HTTP 503")
+
+    monkeypatch.setattr("llmprobe.runner.probe_usage", fake_probe)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.fetch_spec_decode_snapshot", failed_metrics)
+    cfg = config(tmp_path, warmup_requests=0, requests_per_cell=1)
+    cfg = replace(
+        cfg,
+        targets=(
+            replace(cfg.targets[0], metrics_url="http://a/metrics"),
+            cfg.targets[1],
+        ),
+    )
+
+    result = asyncio.run(BenchmarkRunner(cfg, progress=NullProgress(), environ={}).run())
+
+    spec_decode = next(item for item in result.summaries if item.target == "a").spec_decode
+    assert spec_decode is not None
+    assert spec_decode.available is False
+    assert "HTTP 503" in (spec_decode.error or "")
 
 
 def test_probe_runs_once_per_target_only_for_auto(

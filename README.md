@@ -70,7 +70,7 @@ uv run llmprobe run config.yaml
 
 | 文件 | 用途 | 运行方式 |
 |---|---|---|
-| `configs/vllm-chat.yaml` | 单个本地 vLLM/OpenAI-compatible chat 服务；并发 1/2/4/8，输入 128/1024，输出 128，启用 warmup 和 `ignore_eos` | 修改 `base_url`/`model` 后直接运行 |
+| `configs/vllm-chat.yaml` | 单个本地 vLLM/OpenAI-compatible chat 服务；并发 1/2/4/8，输入 128/1024，输出 128，启用 warmup、`ignore_eos` 和可选的 vLLM `/metrics` MTP 采集 | 修改 `base_url`/`model` 后直接运行 |
 | `configs/compare.yaml` | 多 target 对比：本地 vLLM + DeepSeek 官方 API；3 个显式 cell，比较并发 1/4/8 下的表现 | 设置 `DEEPSEEK_API_KEY` 后运行 |
 | `configs/per-target-tokenizers.yaml` | 每个 target 使用各自 tokenizer；包含 Qwen3.8-Flash-Next、DeepSeek-V4.1-Flash、GLM-5.3 示例 | 修改本地端口/model 后运行，需 tokenizer extra |
 
@@ -126,6 +126,8 @@ targets:
     api_key_env: null
     api_key: null
     headers: {}
+    metrics_url: null
+    metrics_headers: {}
     timeout_s: 300
     max_tokens_field: max_tokens
     request_params:
@@ -215,6 +217,8 @@ cell 数 = len(cells)
 | `api_key_env` | 否 | 读取 API Key 的环境变量名（推荐） |
 | `api_key` | 否 | 直接在 YAML 中填写 API Key；使用方便但不推荐，结果文件会自动脱敏 |
 | `headers` | 否 | 额外 HTTP Header；支持 `${ENV_VAR}` 展开 |
+| `metrics_url` | 否 | vLLM Prometheus 指标地址，例如 `http://127.0.0.1:8000/metrics`；不设置则不采集 |
+| `metrics_headers` | 否 | 访问 metrics endpoint 的额外 Header；支持 `${ENV_VAR}` 展开 |
 | `timeout_s` | 否 | 单请求总超时，默认 `300` 秒 |
 | `max_tokens_field` | 否 | 发送 `max_tokens`（默认）或 `max_completion_tokens` |
 | `request_params` | 否 | 合并进请求 body 的额外参数，如 `temperature`、`top_p`、`ignore_eos` |
@@ -243,6 +247,37 @@ targets:
 直接写 `api_key` 会把明文留在 YAML 源文件中，因此要注意文件权限和版本控制；`config.effective.yaml`、`run.json` 等结果文件中的 `api_key` 会被替换为 `<redacted>`。不能同时设置 `api_key` 和 `api_key_env`，也不能同时设置 API Key 和 `Authorization` header。
 
 如果 `ALL_PROXY` 使用非标准 `socks://`，访问非 loopback 服务前请改为 `socks5://host:port` 或 unset；loopback 地址会自动忽略代理。URL query 值会在 dry-run 和持久化配置中脱敏，不要把密钥放在 URL path 或 query key 中。
+
+### MTP / vLLM speculative decoding 指标
+
+如果被测服务是 vLLM，并且开启了 MTP 或其他 speculative decoding 方法，可以在 target 上配置 Prometheus 指标地址：
+
+```yaml
+targets:
+  - name: vllm-mtp-on
+    base_url: http://127.0.0.1:8000/v1
+    model: your-model
+    tokenizer: your-tokenizer
+    metrics_url: http://127.0.0.1:8000/metrics
+    metrics_headers: {}
+    request_params:
+      temperature: 0
+      ignore_eos: true
+```
+
+工具会在每个 cell 的正式请求开始前和结束后各抓取一次 `/metrics`，用两次计数器的差值计算该 cell 的：
+
+- `Draft accept %`：接受 token 数 / draft token 数
+- `Mean accept len`：`1 + 接受 token 数 / draft 次数`，符合 vLLM 的统计约定
+- draft token 数、接受 token 数和 per-position acceptance rate
+
+这些指标对应 vLLM 的 `vllm:spec_decode_num_*` 系列指标。warmup 和 probe 不计入 cell 的指标窗口；但指标是服务实例级别的，若 benchmark 期间还有其他客户端访问同一 vLLM 实例，它们的流量也会计入差值。
+
+如果 target 没有配置 `metrics_url`，或服务没有暴露 speculative decoding 指标（例如 MTP 未开启、版本不支持、使用官方 API），benchmark 仍会正常完成，只是该 cell 的 `spec_decode` 为空或标记为 unavailable。`metrics_headers` 支持 `${ENV_VAR}`，适合需要认证的 metrics endpoint。
+
+metrics 抓取使用独立的短超时（最多 10 秒），失败只会产生警告，不会中止 benchmark。
+
+终端会在主结果表后额外显示 `speculative decoding (vLLM /metrics)` 表；同样的数据也会写入 `summary.json` 的 `spec_decode`、`summary.csv` 的 `spec_decode_*` 字段和 `summary.md`。
 
 ### 终端结果列
 

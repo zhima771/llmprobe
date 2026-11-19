@@ -7,6 +7,7 @@ from llmprobe.config import (
     ConfigError,
     load_config,
     resolve_headers,
+    resolve_metrics_headers,
     sanitize_url,
     target_url,
 )
@@ -302,4 +303,47 @@ def test_legacy_scan_fields_point_to_explicit_cells(tmp_path: Path) -> None:
         "    concurrency: [1, 2]\n    input_lengths: [16]\n    output_lengths: [8]",
     )
     with pytest.raises(ConfigError, match="workload.cells"):
+        load_config(write_config(tmp_path, text), environ={})
+
+
+def test_metrics_endpoint_and_headers_are_parsed(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "    model: test-model\n",
+        "    model: test-model\n"
+        "    metrics_url: http://127.0.0.1:8000/metrics\n"
+        "    metrics_headers:\n"
+        "      Authorization: Bearer ${METRICS_TOKEN}\n",
+    )
+    environment = {"METRICS_TOKEN": "metrics-secret"}
+    config = load_config(write_config(tmp_path, text), environ=environment)
+
+    target = config.targets[0]
+    assert target.metrics_url == "http://127.0.0.1:8000/metrics"
+    assert resolve_metrics_headers(target, environ=environment) == {
+        "Authorization": "Bearer metrics-secret"
+    }
+
+
+def test_missing_metrics_header_env_is_a_config_error(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "    model: test-model\n",
+        "    model: test-model\n"
+        "    metrics_url: http://127.0.0.1:8000/metrics\n"
+        "    metrics_headers:\n"
+        "      Authorization: Bearer ${MISSING_METRICS_TOKEN}\n",
+    )
+    with pytest.raises(ConfigError, match="MISSING_METRICS_TOKEN"):
+        load_config(write_config(tmp_path, text), environ={})
+
+
+@pytest.mark.parametrize(
+    "metrics_url",
+    ["localhost:8000/metrics", "ftp://127.0.0.1/metrics"],
+)
+def test_invalid_metrics_url_is_rejected(tmp_path: Path, metrics_url: str) -> None:
+    text = MINIMAL.replace(
+        "    model: test-model\n",
+        f"    model: test-model\n    metrics_url: {metrics_url}\n",
+    )
+    with pytest.raises(ConfigError, match="metrics_url"):
         load_config(write_config(tmp_path, text), environ={})

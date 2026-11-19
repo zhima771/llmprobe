@@ -31,6 +31,9 @@ targets:
     api_key_env: null
     # api_key: sk-your-key
     headers: {}
+    # 本地 vLLM 的 MTP/spec_decode 指标（官方 API 通常没有该端点）
+    metrics_url: http://127.0.0.1:8000/metrics
+    metrics_headers: {}
     timeout_s: 300
     max_tokens_field: max_tokens
     request_params:
@@ -48,6 +51,8 @@ targets:
     api_key_env: DEEPSEEK_API_KEY
     # api_key: sk-your-key
     headers: {}
+    metrics_url: null
+    metrics_headers: {}
     timeout_s: 300
     max_tokens_field: max_tokens
     request_params:

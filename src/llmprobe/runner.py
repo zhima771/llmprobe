@@ -14,7 +14,12 @@ from llmprobe.client import (
     probe_usage,
     stream_request,
 )
-from llmprobe.config import AppConfig, TargetConfig, resolve_headers
+from llmprobe.config import (
+    AppConfig,
+    TargetConfig,
+    resolve_headers,
+    resolve_metrics_headers,
+)
 from llmprobe.metrics import summarize_results
 from llmprobe.models import (
     Cell,
@@ -22,11 +27,18 @@ from llmprobe.models import (
     GeneratedPrompt,
     RequestResult,
     RunResult,
+    SpecDecodeMetrics,
     TargetCapability,
     make_run_id,
 )
 from llmprobe.promptgen import generate_prompt
 from llmprobe.tokenization import TextTokenizer, canonical_tokenizer_key, load_tokenizer
+from llmprobe.vllm_metrics import (
+    SpecDecodeSnapshot,
+    VLLMMetricsError,
+    diff_spec_decode,
+    fetch_spec_decode_snapshot,
+)
 from llmprobe.workload import build_cells
 
 
@@ -117,6 +129,7 @@ class BenchmarkRunner:
         self.results: list[RequestResult] = []
         self.summaries: list[CellSummary] = []
         self.capabilities: dict[str, TargetCapability] = {}
+        self._metrics_warned: set[tuple[str, str]] = set()
         self.started_at: str | None = None
         self.ended_at: str | None = None
 
@@ -130,12 +143,18 @@ class BenchmarkRunner:
         cells = build_cells(self.config.workload)
         clients: dict[str, Any] = {}
         headers: dict[str, dict[str, str]] = {}
+        metrics_headers: dict[str, dict[str, str]] = {}
         include_usage: dict[str, bool] = {}
         max_concurrency = max(cell.concurrency for cell in cells)
 
         try:
             for target in self.config.targets:
                 headers[target.name] = resolve_headers(target, self.environ)
+                metrics_headers[target.name] = (
+                    resolve_metrics_headers(target, self.environ)
+                    if target.metrics_url is not None
+                    else {}
+                )
                 clients[target.name] = create_http_client(target, max_concurrency)
 
             for target in self.config.targets:
@@ -202,6 +221,16 @@ class BenchmarkRunner:
                             )
                             for index in range(self.config.workload.requests_per_cell)
                         ]
+                    metrics_before: SpecDecodeSnapshot | None = None
+                    metrics_before_error: str | None = None
+                    if target.metrics_url is not None:
+                        metrics_before, metrics_before_error = (
+                            await self._fetch_metrics_snapshot(
+                                target,
+                                clients[target.name],
+                                metrics_headers[target.name],
+                            )
+                        )
                     self.progress.cell_started(target.name, cell, 0)
                     results = await self._execute_requests(
                         target=target,
@@ -214,7 +243,20 @@ class BenchmarkRunner:
                         repeat=0,
                         record=True,
                     )
-                    summary = summarize_results(results, cell, target.name, 0)
+                    spec_decode = await self._spec_decode_for_cell(
+                        target,
+                        clients[target.name],
+                        metrics_headers[target.name],
+                        metrics_before,
+                        metrics_before_error,
+                    )
+                    summary = summarize_results(
+                        results,
+                        cell,
+                        target.name,
+                        0,
+                        spec_decode=spec_decode,
+                    )
                     self.summaries.append(summary)
                     self.progress.cell_finished(summary)
 
@@ -226,6 +268,64 @@ class BenchmarkRunner:
             self.ended_at = self._now()
 
         return self._to_result(interrupted=False)
+
+    async def _fetch_metrics_snapshot(
+        self,
+        target: TargetConfig,
+        client: Any,
+        headers: Mapping[str, str],
+    ) -> tuple[SpecDecodeSnapshot | None, str | None]:
+        if target.metrics_url is None:
+            return None, None
+        try:
+            snapshot = await fetch_spec_decode_snapshot(
+                client,
+                target.metrics_url,
+                headers,
+                timeout_s=min(target.timeout_s, 10.0),
+            )
+        except VLLMMetricsError as exc:
+            return None, str(exc)
+        return snapshot, None
+
+    async def _spec_decode_for_cell(
+        self,
+        target: TargetConfig,
+        client: Any,
+        headers: Mapping[str, str],
+        before: SpecDecodeSnapshot | None,
+        before_error: str | None,
+    ) -> SpecDecodeMetrics | None:
+        if target.metrics_url is None:
+            return None
+        if before_error is not None:
+            error = before_error
+        else:
+            after, after_error = await self._fetch_metrics_snapshot(
+                target, client, headers
+            )
+            if after_error is not None:
+                error = after_error
+            elif before is not None and after is not None:
+                metrics = diff_spec_decode(before, after)
+                if not metrics.available:
+                    self._warn_metrics_unavailable(
+                        target.name, metrics.error or "unavailable"
+                    )
+                return metrics
+            else:
+                error = "metrics snapshot unavailable"
+        self._warn_metrics_unavailable(target.name, error)
+        return SpecDecodeMetrics(available=False, error=error)
+
+    def _warn_metrics_unavailable(self, target_name: str, error: str) -> None:
+        key = (target_name, error)
+        if key in self._metrics_warned:
+            return
+        self._metrics_warned.add(key)
+        self.progress.warning(
+            f"target {target_name} spec decode metrics unavailable: {error}"
+        )
 
     async def _probe_target(
         self,

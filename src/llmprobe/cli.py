@@ -88,9 +88,10 @@ def _print_plan(config: AppConfig, console: Console) -> None:
     console.print(f"warmup requests: {warmups}")
     for target in config.targets:
         tokenizer = target.tokenizer or config.workload.tokenizer or "none"
+        metrics = sanitize_url(target.metrics_url) if target.metrics_url else "none"
         console.print(
             f"  - {target.name}: {target.backend} {sanitize_url(target.base_url)} "
-            f"model={target.model} tokenizer={tokenizer}"
+            f"model={target.model} tokenizer={tokenizer} metrics={metrics}"
         )
 
 

@@ -69,6 +69,8 @@ class TargetConfig:
     api_key: str | None = None
     tokenizer: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    metrics_url: str | None = None
+    metrics_headers: dict[str, str] = field(default_factory=dict)
     timeout_s: float = 300.0
     max_tokens_field: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -277,6 +279,8 @@ def _parse_target(raw: Any, index: int) -> TargetConfig:
             "api_key",
             "tokenizer",
             "headers",
+            "metrics_url",
+            "metrics_headers",
             "timeout_s",
             "max_tokens_field",
             "request_params",
@@ -318,6 +322,19 @@ def _parse_target(raw: Any, index: int) -> TargetConfig:
         key.lower() == "authorization" for key in headers
     ):
         raise ConfigError(f"{path} cannot set both an API key and Authorization header")
+    metrics_url = data.get("metrics_url")
+    if metrics_url is not None:
+        metrics_url = _string(metrics_url, f"{path}.metrics_url")
+        parsed_metrics = urlsplit(metrics_url)
+        if parsed_metrics.scheme not in {"http", "https"} or not parsed_metrics.netloc:
+            raise ConfigError(f"{path}.metrics_url must be an absolute http(s) URL")
+        if parsed_metrics.username is not None or parsed_metrics.password is not None:
+            raise ConfigError(
+                f"{path}.metrics_url must not include username or password"
+            )
+    metrics_headers = _string_map(
+        data.get("metrics_headers", {}), f"{path}.metrics_headers"
+    )
     request_params = dict(_mapping(data.get("request_params", {}), f"{path}.request_params"))
     reserved = sorted(_RESERVED_REQUEST_KEYS.intersection(request_params))
     if reserved:
@@ -334,6 +351,8 @@ def _parse_target(raw: Any, index: int) -> TargetConfig:
         api_key=api_key,
         tokenizer=tokenizer,
         headers=headers,
+        metrics_url=metrics_url,
+        metrics_headers=metrics_headers,
         timeout_s=_number(data.get("timeout_s", 300.0), f"{path}.timeout_s", minimum=0.001),
         max_tokens_field=max_tokens_field,  # type: ignore[arg-type]
         request_params=request_params,
@@ -414,12 +433,24 @@ def resolve_headers(
     return headers
 
 
+def resolve_metrics_headers(
+    target: TargetConfig, environ: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    env = os.environ if environ is None else environ
+    return {
+        key: _expand_env(value, env, f"target {target.name} metrics_headers.{key}")
+        for key, value in target.metrics_headers.items()
+    }
+
+
 def validate_environment(
     config: AppConfig, environ: Mapping[str, str] | None = None
 ) -> None:
     env = os.environ if environ is None else environ
     for target in config.targets:
         resolve_headers(target, env)
+        if target.metrics_url is not None:
+            resolve_metrics_headers(target, env)
 
 
 def sanitize_url(url: str) -> str:

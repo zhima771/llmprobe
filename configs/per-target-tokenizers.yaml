@@ -32,6 +32,8 @@ targets:
     api_key_env: null
     # api_key: sk-your-key
     headers: {}
+    metrics_url: null
+    metrics_headers: {}
     timeout_s: 300
     max_tokens_field: max_tokens
     request_params:
@@ -48,6 +50,8 @@ targets:
     api_key_env: null
     # api_key: sk-your-key
     headers: {}
+    metrics_url: null
+    metrics_headers: {}
     timeout_s: 300
     max_tokens_field: max_tokens
     request_params:
@@ -64,6 +68,8 @@ targets:
     api_key_env: null
     # api_key: sk-your-key
     headers: {}
+    metrics_url: null
+    metrics_headers: {}
     timeout_s: 300
     max_tokens_field: max_tokens
     request_params:

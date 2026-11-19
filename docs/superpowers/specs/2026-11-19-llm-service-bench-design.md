@@ -105,6 +105,8 @@ targets:
     api_key_env: OPENAI_API_KEY
     tokenizer: qwen3.6-35b
     headers: {}
+    metrics_url: http://127.0.0.1:8000/metrics
+    metrics_headers: {}
     timeout_s: 300
     max_tokens_field: max_tokens
     request_params:
@@ -143,6 +145,7 @@ targets:
 - API key 推荐通过 `api_key_env` 从环境变量读取，也支持直接配置 `api_key`；写日志和结果前必须脱敏。headers 支持 `${ENV_VAR}` 展开；缺失环境变量属于配置错误。
 - `timeout_s` 是单个请求从发起到流结束的总超时。
 - 可选 `http2`、`verify_tls`、`ca_bundle`，用于网关和自签名本地服务。
+- 可选 `metrics_url` 指向 vLLM Prometheus endpoint；配置后按 cell 采集 speculative decoding/MTP 指标。`metrics_headers` 用于独立的 metrics 认证，支持 `${ENV_VAR}` 展开。
 
 ## 6. 工作负载模型
 
@@ -200,6 +203,13 @@ for cell in cells:
 - probe 和 workload warmup 都不属于正式测量；这样既能为每个长度/并发准备服务状态，也不改变正式样本数。
 - 若 `warmup_requests: 0`，仍保留 `stream_options: auto` 的 probe，因为它是能力探测而非负载预热。
 - warmup/probe 失败时，auto 模式可在明确识别为 `stream_options` 不受支持时降级；其他错误将该 target 标记为不可用并跳过其剩余 cell，其他 target 和 cell 继续执行。
+
+### 6.5 vLLM speculative decoding / MTP metrics
+
+- 当 target 配置 `metrics_url` 时，在每个 cell 的 warmup 完成后、正式请求开始前抓取一次 Prometheus 文本，在正式请求结束后再抓取一次。
+- 通过计数器差值计算 `spec_decode_num_draft_tokens`、`spec_decode_num_accepted_tokens`、`spec_decode_num_drafts` 和 per-position acceptance rate；warmup、probe 和相邻 cell 不计入该 cell 窗口。
+- `Draft accept % = accepted / drafted`；`Mean accept len = 1 + accepted / drafts`。若指标缺失、MTP 未开启或 endpoint 不可用，benchmark 继续执行，并在 cell 结果中标记 unavailable。
+- 指标是服务实例级累计值；同一实例上的其他并发流量会进入差值。需要严格 A/B 时应隔离服务实例。
 
 ## 7. API 兼容层
 

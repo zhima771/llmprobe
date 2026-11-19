@@ -95,11 +95,26 @@ class CellSummary:
     output_tokens_mean: float | None
     peak_concurrency: int
     token_sources: dict[str, int] = field(default_factory=dict)
+    spec_decode: SpecDecodeMetrics | None = None
 
     @property
     def decode_tokens_per_s_per_stream(self) -> float | None:
         """Backward-compatible alias for decode_tokens_per_s."""
         return self.decode_tokens_per_s
+
+
+@dataclass(frozen=True)
+class SpecDecodeMetrics:
+    """Speculative-decoding counters observed during one cell."""
+
+    available: bool
+    drafts: float | None = None
+    draft_tokens: float | None = None
+    accepted_tokens: float | None = None
+    acceptance_rate: float | None = None
+    mean_acceptance_length: float | None = None
+    per_position_acceptance_rate: tuple[float, ...] = ()
+    error: str | None = None
 
 
 @dataclass(frozen=True)

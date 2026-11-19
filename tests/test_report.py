@@ -11,7 +11,14 @@ from rich.console import Console
 
 from llmprobe.config import AppConfig, CellSpec, RunConfig, TargetConfig, WorkloadConfig
 from llmprobe.metrics import summarize_results
-from llmprobe.models import Cell, CellSummary, RequestResult, RunResult, TargetCapability
+from llmprobe.models import (
+    Cell,
+    CellSummary,
+    RequestResult,
+    RunResult,
+    SpecDecodeMetrics,
+    TargetCapability,
+)
 from llmprobe.report import (
     config_to_dict,
     print_summary,
@@ -530,6 +537,66 @@ def test_print_summary_renders_the_run_table() -> None:
     assert "10.00 / 10.00 ms" in rendered
     assert "20.00 / 20.00 ms" in rendered
     assert "100.00" in rendered
+
+
+def test_spec_decode_metrics_are_written_and_rendered(tmp_path: Path) -> None:
+    item = make_result()
+    summary = replace(
+        make_summary(item),
+        spec_decode=SpecDecodeMetrics(
+            available=True,
+            drafts=10,
+            draft_tokens=50,
+            accepted_tokens=35,
+            acceptance_rate=0.7,
+            mean_acceptance_length=4.5,
+            per_position_acceptance_rate=(0.8, 0.6, 0.4),
+        ),
+    )
+    run = make_run([summary], [item])
+    output = write_report(run, make_config(tmp_path))
+
+    payload = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    spec_decode = payload["summaries"][0]["spec_decode"]
+    assert spec_decode["available"] is True
+    assert spec_decode["acceptance_rate"] == pytest.approx(0.7)
+    assert spec_decode["mean_acceptance_length"] == pytest.approx(4.5)
+    with (output / "summary.csv").open(encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["spec_decode_acceptance_rate"] == "0.7"
+    assert row["spec_decode_per_position_acceptance_rate"] == "[0.8, 0.6, 0.4]"
+    markdown = (output / "summary.md").read_text(encoding="utf-8")
+    assert "## Speculative Decoding (vLLM /metrics)" in markdown
+    assert "70.00%" in markdown
+    assert "80.0% / 60.0% / 40.0%" in markdown
+
+    stream = io.StringIO()
+    print_summary(run, Console(file=stream, force_terminal=False, width=240))
+    rendered = stream.getvalue()
+    assert "speculative decoding (vLLM /metrics)" in rendered
+    assert "Draft accept %" in rendered
+    assert "70.00%" in rendered
+    assert "4.50" in rendered
+
+
+def test_metrics_endpoint_is_sanitized_and_headers_are_redacted(tmp_path: Path) -> None:
+    config = replace(
+        make_config(tmp_path),
+        targets=(
+            replace(
+                make_config(tmp_path).targets[0],
+                metrics_url=(
+                    "https://metrics.example/metrics?token=query-secret"
+                ),
+                metrics_headers={"Authorization": "Bearer metrics-secret"},
+            ),
+        ),
+    )
+
+    target = config_to_dict(config)["targets"][0]
+    assert target["metrics_url"].startswith("https://metrics.example/metrics?")
+    assert "query-secret" not in target["metrics_url"]
+    assert target["metrics_headers"]["Authorization"] == "<redacted>"
 
 
 def test_config_serialization_sanitizes_base_url_credentials_and_query(

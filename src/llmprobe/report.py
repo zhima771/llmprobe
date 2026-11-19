@@ -105,6 +105,14 @@ _CSV_FIELDS = [
     "output_tokens_mean",
     "peak_concurrency",
     "token_sources",
+    "spec_decode_available",
+    "spec_decode_acceptance_rate",
+    "spec_decode_mean_acceptance_length",
+    "spec_decode_drafts",
+    "spec_decode_draft_tokens",
+    "spec_decode_accepted_tokens",
+    "spec_decode_per_position_acceptance_rate",
+    "spec_decode_error",
 ]
 def _jsonable(value: Any) -> Any:
     if isinstance(value, Path):
@@ -176,9 +184,11 @@ def _redact(value: Any) -> Any:
     return value
 
 
-def _redact_target_headers(target: dict[str, Any], source: object) -> None:
-    headers = getattr(source, "headers", {})
-    target["headers"] = {
+def _redact_target_headers(
+    target: dict[str, Any], source: object, field_name: str = "headers"
+) -> None:
+    headers = getattr(source, field_name, {})
+    target[field_name] = {
         str(key): (
             value
             if isinstance(value, str) and _ENV_PLACEHOLDER_ONLY.fullmatch(value)
@@ -195,8 +205,11 @@ def config_to_dict(config: AppConfig) -> dict[str, Any]:
         for source_target, target in zip(config.targets, targets, strict=True):
             if isinstance(target, dict):
                 _redact_target_headers(target, source_target)
+                _redact_target_headers(target, source_target, "metrics_headers")
                 if isinstance(target.get("base_url"), str):
                     target["base_url"] = sanitize_url(target["base_url"])
+                if isinstance(target.get("metrics_url"), str):
+                    target["metrics_url"] = sanitize_url(target["metrics_url"])
     return data
 
 
@@ -247,6 +260,7 @@ def summary_to_dict(summary: CellSummary) -> dict[str, Any]:
 
 
 def _flatten_summary(summary: CellSummary) -> dict[str, Any]:
+    spec_decode = summary.spec_decode
     return {
         "target": summary.target,
         "cell_id": summary.cell_id,
@@ -275,6 +289,24 @@ def _flatten_summary(summary: CellSummary) -> dict[str, Any]:
         "output_tokens_mean": summary.output_tokens_mean,
         "peak_concurrency": summary.peak_concurrency,
         "token_sources": json.dumps(summary.token_sources, sort_keys=True),
+        "spec_decode_available": spec_decode.available if spec_decode else None,
+        "spec_decode_acceptance_rate": (
+            spec_decode.acceptance_rate if spec_decode else None
+        ),
+        "spec_decode_mean_acceptance_length": (
+            spec_decode.mean_acceptance_length if spec_decode else None
+        ),
+        "spec_decode_drafts": spec_decode.drafts if spec_decode else None,
+        "spec_decode_draft_tokens": spec_decode.draft_tokens if spec_decode else None,
+        "spec_decode_accepted_tokens": (
+            spec_decode.accepted_tokens if spec_decode else None
+        ),
+        "spec_decode_per_position_acceptance_rate": (
+            json.dumps(spec_decode.per_position_acceptance_rate)
+            if spec_decode and spec_decode.per_position_acceptance_rate
+            else None
+        ),
+        "spec_decode_error": spec_decode.error if spec_decode else None,
     }
 
 
@@ -284,6 +316,18 @@ def _format_number(value: float | None, digits: int = 2) -> str:
 
 def _avg_p95(mean_ms: float | None, p95_ms: float | None) -> str:
     return f"{_format_number(mean_ms)} / {_format_number(p95_ms)} ms"
+
+
+def _format_percent(value: float | None) -> str:
+    return "-" if value is None else f"{value * 100.0:.2f}%"
+
+
+def _format_count(value: float | None) -> str:
+    return "-" if value is None else f"{value:.0f}"
+
+
+def _format_per_position(values: tuple[float, ...]) -> str:
+    return "-" if not values else " / ".join(f"{value * 100.0:.1f}%" for value in values)
 
 
 def _escape_line_breaks(value: str) -> str:
@@ -321,6 +365,35 @@ def _markdown(result: RunResult) -> str:
             f"{_avg_p95(summary.itl.mean_ms, summary.itl.p95_ms)} | "
             f"{_avg_p95(summary.e2el.mean_ms, summary.e2el.p95_ms)} |"
         )
+    spec_decode = [summary for summary in result.summaries if summary.spec_decode]
+    if spec_decode:
+        lines.extend(
+            [
+                "",
+                "## Speculative Decoding (vLLM /metrics)",
+                "",
+                (
+                    "| Target | Cell | Status | Draft accept % | Mean accept len | "
+                    "Drafts | Draft tok | Accepted tok | Per-position accept |"
+                ),
+                "|---|---|---|---:|---:|---:|---:|---:|---|",
+            ]
+        )
+        for summary in spec_decode:
+            metrics = summary.spec_decode
+            assert metrics is not None
+            status = "ok" if metrics.available else (metrics.error or "unavailable")
+            lines.append(
+                f"| {_escape_table_cell(summary.target)} | "
+                f"{_escape_table_cell(summary.cell_id)} | "
+                f"{_escape_table_cell(status)} | "
+                f"{_format_percent(metrics.acceptance_rate)} | "
+                f"{_format_number(metrics.mean_acceptance_length)} | "
+                f"{_format_count(metrics.drafts)} | "
+                f"{_format_count(metrics.draft_tokens)} | "
+                f"{_format_count(metrics.accepted_tokens)} | "
+                f"{_format_per_position(metrics.per_position_acceptance_rate)} |"
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -429,3 +502,34 @@ def print_summary(result: RunResult, console: Console | None = None) -> None:
             _avg_p95(summary.e2el.mean_ms, summary.e2el.p95_ms),
         )
     output.print(table)
+
+    spec_decode = [summary for summary in result.summaries if summary.spec_decode]
+    if not spec_decode:
+        return
+    spec_table = Table(title="speculative decoding (vLLM /metrics)")
+    for column in (
+        "Target",
+        "Cell",
+        "Draft accept %",
+        "Mean accept len",
+        "Drafts",
+        "Draft tok",
+        "Accepted tok",
+    ):
+        spec_table.add_column(
+            column,
+            justify="right" if column not in {"Target", "Cell"} else "left",
+        )
+    for summary in spec_decode:
+        metrics = summary.spec_decode
+        assert metrics is not None
+        spec_table.add_row(
+            summary.target,
+            summary.cell_id,
+            _format_percent(metrics.acceptance_rate),
+            _format_number(metrics.mean_acceptance_length),
+            _format_count(metrics.drafts),
+            _format_count(metrics.draft_tokens),
+            _format_count(metrics.accepted_tokens),
+        )
+    output.print(spec_table)
