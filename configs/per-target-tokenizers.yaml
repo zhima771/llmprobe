@@ -1,8 +1,13 @@
+# 每个 target 使用各自 tokenizer 的示例。
+# 需要 tokenizer extra：uv sync --extra tokenizer
+
 run:
   name: per-target-tokenizers
   seed: 42
   output_dir: results
   cooldown_s: 2
+  save_generated_text: false
+  save_itl: false
 
 workload:
   dataset: random
@@ -11,6 +16,9 @@ workload:
   concurrency: [1, 2, 4]
   input_lengths: [512]
   output_lengths: [128]
+  system_prompt: ""
+  # 全局参考 tokenizer；target 可以覆盖
+  tokenizer: qwen3.6-35b
   stream_options: auto
 
 targets:
@@ -19,21 +27,45 @@ targets:
     base_url: http://127.0.0.1:8000/v1
     model: Qwen3.8-Flash-Next
     tokenizer: qwen3.8-flash-next
+    api_key_env: null
+    # api_key: sk-your-key
+    headers: {}
+    timeout_s: 300
+    max_tokens_field: max_tokens
     request_params:
       temperature: 0
+    http2: false
+    verify_tls: true
+    ca_bundle: null
 
   - name: deepseek-v4.1-flash
     backend: openai-chat
     base_url: http://127.0.0.1:8001/v1
     model: DeepSeek-V4.1-Flash-1017
     tokenizer: deepseek-v4.1-flash
+    api_key_env: null
+    # api_key: sk-your-key
+    headers: {}
+    timeout_s: 300
+    max_tokens_field: max_tokens
     request_params:
       temperature: 0
+    http2: false
+    verify_tls: true
+    ca_bundle: null
 
   - name: glm-5.3
     backend: openai-chat
     base_url: http://127.0.0.1:8002/v1
     model: GLM-5.3
     tokenizer: glm-5.3
+    api_key_env: null
+    # api_key: sk-your-key
+    headers: {}
+    timeout_s: 300
+    max_tokens_field: max_tokens
     request_params:
       temperature: 0
+    http2: false
+    verify_tls: true
+    ca_bundle: null

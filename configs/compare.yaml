@@ -1,8 +1,13 @@
+# 多 target 对比示例：本地 vLLM + 官方 API。
+# 运行前设置 DEEPSEEK_API_KEY。
+
 run:
   name: vllm-vs-deepseek
   seed: 42
   output_dir: results
   cooldown_s: 5
+  save_generated_text: false
+  save_itl: false
 
 workload:
   dataset: random
@@ -11,6 +16,8 @@ workload:
   concurrency: [1, 4, 8]
   input_lengths: [512]
   output_lengths: [128]
+  system_prompt: ""
+  tokenizer: null
   stream_options: auto
 
 targets:
@@ -18,15 +25,31 @@ targets:
     backend: openai-chat
     base_url: http://127.0.0.1:8000/v1
     model: Qwen/Qwen3-8B
+    tokenizer: null
+    api_key_env: null
+    # api_key: sk-your-key
+    headers: {}
+    timeout_s: 300
+    max_tokens_field: max_tokens
     request_params:
       temperature: 0
       ignore_eos: true
+    http2: false
+    verify_tls: true
+    ca_bundle: null
 
   - name: deepseek
     backend: openai-chat
     base_url: https://api.deepseek.com/v1
     model: deepseek-chat
+    tokenizer: null
     api_key_env: DEEPSEEK_API_KEY
+    # api_key: sk-your-key
+    headers: {}
     timeout_s: 300
+    max_tokens_field: max_tokens
     request_params:
       temperature: 0
+    http2: false
+    verify_tls: true
+    ca_bundle: null
