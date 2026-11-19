@@ -1,4 +1,4 @@
-# llmbench Implementation Plan
+# llmprobe Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Package name is `llmbench`; console entry point is `llmbench`; module entry point is `python -m llmbench`.
+- Package name is `llmprobe`; console entry point is `llmprobe`; module entry point is `python -m llmprobe`.
 - Python floor is `>=3.11`.
 - Runtime dependencies are exactly: `httpx>=0.27,<1`, `PyYAML>=6`, `rich>=13`.
 - Optional tokenizer dependencies are `tokenizers>=0.20` and `huggingface-hub>=0.23`.
@@ -45,12 +45,12 @@ python3 -m pytest -q
 **Files:**
 - Create: `.gitignore`
 - Create: `pyproject.toml`
-- Create: `src/llmbench/__init__.py`
+- Create: `src/llmprobe/__init__.py`
 - Test: `tests/test_scaffold.py`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: importable package `llmbench` with `__version__ = "0.1.0"`.
+- Produces: importable package `llmprobe` with `__version__ = "0.1.0"`.
 
 - [ ] **Step 1: Initialize the repository if `.git` is still the empty placeholder**
 
@@ -70,11 +70,11 @@ Expected: a valid git repository. Do not delete or overwrite a `.git` directory 
 
 ```python
 # tests/test_scaffold.py
-import llmbench
+import llmprobe
 
 
 def test_package_version_is_defined() -> None:
-    assert llmbench.__version__ == "0.1.0"
+    assert llmprobe.__version__ == "0.1.0"
 ```
 
 - [ ] **Step 3: Run the test and verify it fails**
@@ -87,7 +87,7 @@ export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 python3 -m pytest tests/test_scaffold.py -q
 ```
 
-Expected: FAIL because `llmbench` cannot be imported.
+Expected: FAIL because `llmprobe` cannot be imported.
 
 - [ ] **Step 4: Create project metadata and package init**
 
@@ -113,7 +113,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llmbench"
+name = "llmprobe"
 version = "0.1.0"
 description = "Multi-target OpenAI-compatible LLM serving benchmark"
 readme = "README.md"
@@ -129,7 +129,7 @@ tokenizer = ["tokenizers>=0.20", "huggingface-hub>=0.23"]
 dev = ["pytest>=8", "ruff>=0.8"]
 
 [project.scripts]
-llmbench = "llmbench.cli:main"
+llmprobe = "llmprobe.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -144,10 +144,10 @@ line-length = 100
 target-version = "py311"
 ```
 
-`src/llmbench/__init__.py`:
+`src/llmprobe/__init__.py`:
 
 ```python
-"""llmbench package."""
+"""llmprobe package."""
 
 __version__ = "0.1.0"
 ```
@@ -167,8 +167,8 @@ Expected: `1 passed`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add .gitignore pyproject.toml src/llmbench/__init__.py tests/test_scaffold.py
-git commit -m "chore: scaffold llmbench package"
+git add .gitignore pyproject.toml src/llmprobe/__init__.py tests/test_scaffold.py
+git commit -m "chore: scaffold llmprobe package"
 ```
 
 ---
@@ -176,11 +176,11 @@ git commit -m "chore: scaffold llmbench package"
 ### Task 2: Configuration Parsing and Secret Resolution
 
 **Files:**
-- Create: `src/llmbench/config.py`
+- Create: `src/llmprobe/config.py`
 - Test: `tests/test_config.py`
 
 **Interfaces:**
-- Consumes: `llmbench` package.
+- Consumes: `llmprobe` package.
 - Produces:
   - `ConfigError(ValueError)`
   - `RunConfig(name, seed, output_dir, repeats, cooldown_s, save_generated_text, save_itl)`
@@ -200,7 +200,7 @@ from pathlib import Path
 
 import pytest
 
-from llmbench.config import (
+from llmprobe.config import (
     ConfigError,
     load_config,
     resolve_headers,
@@ -286,11 +286,11 @@ export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 python3 -m pytest tests/test_config.py -q
 ```
 
-Expected: FAIL because `llmbench.config` does not exist.
+Expected: FAIL because `llmprobe.config` does not exist.
 
 - [ ] **Step 3: Implement configuration parsing**
 
-Create `src/llmbench/config.py`:
+Create `src/llmprobe/config.py`:
 
 ```python
 from __future__ import annotations
@@ -637,7 +637,7 @@ Expected: all tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/llmbench/config.py tests/test_config.py
+git add src/llmprobe/config.py tests/test_config.py
 git commit -m "feat: parse and validate benchmark config"
 ```
 
@@ -646,10 +646,10 @@ git commit -m "feat: parse and validate benchmark config"
 ### Task 3: Models, Matrix Expansion, Tokenization, and Deterministic Prompts
 
 **Files:**
-- Create: `src/llmbench/models.py`
-- Create: `src/llmbench/workload.py`
-- Create: `src/llmbench/tokenization.py`
-- Create: `src/llmbench/promptgen.py`
+- Create: `src/llmprobe/models.py`
+- Create: `src/llmprobe/workload.py`
+- Create: `src/llmprobe/tokenization.py`
+- Create: `src/llmprobe/promptgen.py`
 - Test: `tests/test_workload.py`
 - Test: `tests/test_promptgen.py`
 
@@ -669,8 +669,8 @@ git commit -m "feat: parse and validate benchmark config"
 
 ```python
 # tests/test_workload.py
-from llmbench.config import WorkloadConfig
-from llmbench.workload import build_cells, cell_seed
+from llmprobe.config import WorkloadConfig
+from llmprobe.workload import build_cells, cell_seed
 
 
 def test_build_cells_preserves_config_order() -> None:
@@ -702,9 +702,9 @@ def test_cell_seed_is_stable_and_repeat_sensitive() -> None:
 
 ```python
 # tests/test_promptgen.py
-from llmbench.config import WorkloadConfig
-from llmbench.promptgen import generate_prompt
-from llmbench.workload import build_cells
+from llmprobe.config import WorkloadConfig
+from llmprobe.promptgen import generate_prompt
+from llmprobe.workload import build_cells
 
 
 class WordTokenizer:
@@ -778,7 +778,7 @@ Expected: FAIL because the modules do not exist.
 
 - [ ] **Step 3: Implement shared models**
 
-Create `src/llmbench/models.py`:
+Create `src/llmprobe/models.py`:
 
 ```python
 from __future__ import annotations
@@ -911,15 +911,15 @@ def make_run_id(output_dir: Path, name: str) -> str:
 
 - [ ] **Step 4: Implement workload and tokenizer modules**
 
-Create `src/llmbench/workload.py`:
+Create `src/llmprobe/workload.py`:
 
 ```python
 from __future__ import annotations
 
 import hashlib
 
-from llmbench.config import WorkloadConfig
-from llmbench.models import Cell
+from llmprobe.config import WorkloadConfig
+from llmprobe.models import Cell
 
 
 def build_cells(workload: WorkloadConfig) -> list[Cell]:
@@ -943,14 +943,14 @@ def cell_seed(global_seed: int, cell: Cell, repeat: int) -> int:
     return int.from_bytes(hashlib.blake2b(payload, digest_size=8).digest(), "big")
 ```
 
-Create `src/llmbench/tokenization.py`:
+Create `src/llmprobe/tokenization.py`:
 
 ```python
 from __future__ import annotations
 
 from typing import Protocol
 
-from llmbench.config import ConfigError
+from llmprobe.config import ConfigError
 
 
 class TextTokenizer(Protocol):
@@ -1003,7 +1003,7 @@ def load_tokenizer(spec: str | None) -> TextTokenizer | None:
     except ImportError as exc:
         raise ConfigError(
             "tokenizer support requires the optional dependencies: "
-            "pip install 'llmbench[tokenizer]'"
+            "pip install 'llmprobe[tokenizer]'"
         ) from exc
     if "/" in spec and not spec.endswith(".json"):
         tokenizer = Tokenizer.from_pretrained(spec)
@@ -1014,7 +1014,7 @@ def load_tokenizer(spec: str | None) -> TextTokenizer | None:
 
 - [ ] **Step 5: Implement deterministic prompt generation**
 
-Create `src/llmbench/promptgen.py`:
+Create `src/llmprobe/promptgen.py`:
 
 ```python
 from __future__ import annotations
@@ -1022,10 +1022,10 @@ from __future__ import annotations
 import math
 import random
 
-from llmbench.config import ConfigError, WorkloadConfig
-from llmbench.models import Cell, GeneratedPrompt
-from llmbench.tokenization import TextTokenizer
-from llmbench.workload import cell_seed
+from llmprobe.config import ConfigError, WorkloadConfig
+from llmprobe.models import Cell, GeneratedPrompt
+from llmprobe.tokenization import TextTokenizer
+from llmprobe.workload import cell_seed
 
 _WORDS = (
     "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu "
@@ -1126,7 +1126,7 @@ Expected: all tests pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/llmbench/models.py src/llmbench/workload.py src/llmbench/tokenization.py src/llmbench/promptgen.py tests/test_workload.py tests/test_promptgen.py
+git add src/llmprobe/models.py src/llmprobe/workload.py src/llmprobe/tokenization.py src/llmprobe/promptgen.py tests/test_workload.py tests/test_promptgen.py
 git commit -m "feat: add workload matrix and synthetic prompt generation"
 ```
 
@@ -1135,7 +1135,7 @@ git commit -m "feat: add workload matrix and synthetic prompt generation"
 ### Task 4: Incremental SSE Parser
 
 **Files:**
-- Create: `src/llmbench/sse.py`
+- Create: `src/llmprobe/sse.py`
 - Test: `tests/test_sse.py`
 
 **Interfaces:**
@@ -1146,7 +1146,7 @@ git commit -m "feat: add workload matrix and synthetic prompt generation"
 
 ```python
 # tests/test_sse.py
-from llmbench.sse import SSEParser
+from llmprobe.sse import SSEParser
 
 
 def test_parses_fragmented_utf8_and_crlf() -> None:
@@ -1186,11 +1186,11 @@ export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 python3 -m pytest tests/test_sse.py -q
 ```
 
-Expected: FAIL because `llmbench.sse` does not exist.
+Expected: FAIL because `llmprobe.sse` does not exist.
 
 - [ ] **Step 3: Implement the parser**
 
-Create `src/llmbench/sse.py`:
+Create `src/llmprobe/sse.py`:
 
 ```python
 from __future__ import annotations
@@ -1258,7 +1258,7 @@ Expected: all tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/llmbench/sse.py tests/test_sse.py
+git add src/llmprobe/sse.py tests/test_sse.py
 git commit -m "feat: add incremental SSE parser"
 ```
 
@@ -1267,7 +1267,7 @@ git commit -m "feat: add incremental SSE parser"
 ### Task 5: Streaming OpenAI-Compatible Client and Measurement
 
 **Files:**
-- Create: `src/llmbench/client.py`
+- Create: `src/llmprobe/client.py`
 - Test: `tests/test_client.py`
 
 **Interfaces:**
@@ -1290,14 +1290,14 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 
-from llmbench.client import (
+from llmprobe.client import (
     TargetProbeError,
     build_payload,
     probe_usage,
     stream_request,
 )
-from llmbench.config import TargetConfig
-from llmbench.models import Cell, GeneratedPrompt
+from llmprobe.config import TargetConfig
+from llmprobe.models import Cell, GeneratedPrompt
 
 
 class ChunkStream(httpx.AsyncByteStream):
@@ -1554,11 +1554,11 @@ export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 python3 -m pytest tests/test_client.py -q
 ```
 
-Expected: FAIL because `llmbench.client` does not exist.
+Expected: FAIL because `llmprobe.client` does not exist.
 
 - [ ] **Step 3: Implement the client and stream measurement**
 
-Create `src/llmbench/client.py`:
+Create `src/llmprobe/client.py`:
 
 ```python
 from __future__ import annotations
@@ -1571,10 +1571,10 @@ from typing import Any
 
 import httpx
 
-from llmbench.config import TargetConfig, target_url
-from llmbench.models import Cell, GeneratedPrompt, RequestResult
-from llmbench.sse import SSEParser
-from llmbench.tokenization import TextTokenizer
+from llmprobe.config import TargetConfig, target_url
+from llmprobe.models import Cell, GeneratedPrompt, RequestResult
+from llmprobe.sse import SSEParser
+from llmprobe.tokenization import TextTokenizer
 
 
 class TargetProbeError(RuntimeError):
@@ -1939,7 +1939,7 @@ Expected: all tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/llmbench/client.py tests/test_client.py
+git add src/llmprobe/client.py tests/test_client.py
 git commit -m "feat: add streaming benchmark client"
 ```
 
@@ -1948,7 +1948,7 @@ git commit -m "feat: add streaming benchmark client"
 ### Task 6: Request and Cell Metrics
 
 **Files:**
-- Create: `src/llmbench/metrics.py`
+- Create: `src/llmprobe/metrics.py`
 - Test: `tests/test_metrics.py`
 
 **Interfaces:**
@@ -1966,8 +1966,8 @@ import time
 
 import pytest
 
-from llmbench.metrics import latency_stats, percentile, summarize_results
-from llmbench.models import Cell, RequestResult
+from llmprobe.metrics import latency_stats, percentile, summarize_results
+from llmprobe.models import Cell, RequestResult
 
 
 def result(
@@ -2074,11 +2074,11 @@ export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 python3 -m pytest tests/test_metrics.py -q
 ```
 
-Expected: FAIL because `llmbench.metrics` does not exist.
+Expected: FAIL because `llmprobe.metrics` does not exist.
 
 - [ ] **Step 3: Implement metrics**
 
-Create `src/llmbench/metrics.py`:
+Create `src/llmprobe/metrics.py`:
 
 ```python
 from __future__ import annotations
@@ -2087,7 +2087,7 @@ import math
 import statistics
 from collections import Counter
 
-from llmbench.models import Cell, CellSummary, LatencyStats, RequestResult
+from llmprobe.models import Cell, CellSummary, LatencyStats, RequestResult
 
 
 def percentile(values: list[float], p: float) -> float | None:
@@ -2216,7 +2216,7 @@ Expected: all tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/llmbench/metrics.py tests/test_metrics.py
+git add src/llmprobe/metrics.py tests/test_metrics.py
 git commit -m "feat: calculate serving benchmark metrics"
 ```
 
@@ -2225,7 +2225,7 @@ git commit -m "feat: calculate serving benchmark metrics"
 ### Task 7: Benchmark Orchestration
 
 **Files:**
-- Create: `src/llmbench/runner.py`
+- Create: `src/llmprobe/runner.py`
 - Test: `tests/test_runner.py`
 
 **Interfaces:**
@@ -2248,9 +2248,9 @@ from pathlib import Path
 
 import pytest
 
-from llmbench.config import AppConfig, RunConfig, TargetConfig, WorkloadConfig
-from llmbench.models import RequestResult
-from llmbench.runner import BenchmarkRunner, NullProgress
+from llmprobe.config import AppConfig, RunConfig, TargetConfig, WorkloadConfig
+from llmprobe.models import RequestResult
+from llmprobe.runner import BenchmarkRunner, NullProgress
 
 
 def config(tmp_path: Path, *, stream_options: str = "auto") -> AppConfig:
@@ -2321,8 +2321,8 @@ def test_runner_executes_probe_warmup_and_measurement_order(
             kwargs["request_index"],
         )
 
-    monkeypatch.setattr("llmbench.runner.probe_usage", fake_probe)
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.probe_usage", fake_probe)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(config(tmp_path), progress=NullProgress(), environ={})
     result = asyncio.run(runner.run())
     assert len(result.summaries) == 2
@@ -2352,7 +2352,7 @@ def test_target_is_skipped_when_all_warmups_fail(
         measured_targets.append(target.name)
         return make_result(target.name, kwargs["cell"], kwargs["repeat"], kwargs["request_index"])
 
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(tmp_path, stream_options="none"), progress=NullProgress(), environ={}
     )
@@ -2367,7 +2367,7 @@ def test_partial_result_summarizes_completed_requests(
     async def fake_request(client, target, prompt, **kwargs):
         return make_result(target.name, kwargs["cell"], kwargs["repeat"], kwargs["request_index"])
 
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(tmp_path, stream_options="none"), progress=NullProgress(), environ={}
     )
@@ -2386,11 +2386,11 @@ export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 python3 -m pytest tests/test_runner.py -q
 ```
 
-Expected: FAIL because `llmbench.runner` does not exist.
+Expected: FAIL because `llmprobe.runner` does not exist.
 
 - [ ] **Step 3: Implement the runner**
 
-Create `src/llmbench/runner.py`:
+Create `src/llmprobe/runner.py`:
 
 ```python
 from __future__ import annotations
@@ -2403,19 +2403,19 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Protocol
 
-from llmbench.client import (
+from llmprobe.client import (
     TargetProbeError,
     create_http_client,
     probe_usage,
     stream_request,
 )
-from llmbench.config import (
+from llmprobe.config import (
     AppConfig,
     TargetConfig,
     resolve_headers,
 )
-from llmbench.metrics import summarize_results
-from llmbench.models import (
+from llmprobe.metrics import summarize_results
+from llmprobe.models import (
     Cell,
     CellSummary,
     RequestResult,
@@ -2423,9 +2423,9 @@ from llmbench.models import (
     TargetCapability,
     make_run_id,
 )
-from llmbench.promptgen import generate_prompt
-from llmbench.tokenization import TextTokenizer, load_tokenizer
-from llmbench.workload import build_cells
+from llmprobe.promptgen import generate_prompt
+from llmprobe.tokenization import TextTokenizer, load_tokenizer
+from llmprobe.workload import build_cells
 
 
 class ProgressSink(Protocol):
@@ -2739,7 +2739,7 @@ Expected: all tests pass. The order test expects probe calls for both targets, f
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/llmbench/runner.py tests/test_runner.py
+git add src/llmprobe/runner.py tests/test_runner.py
 git commit -m "feat: orchestrate multi-target benchmark runs"
 ```
 
@@ -2748,7 +2748,7 @@ git commit -m "feat: orchestrate multi-target benchmark runs"
 ### Task 8: Result Serialization and Reports
 
 **Files:**
-- Create: `src/llmbench/report.py`
+- Create: `src/llmprobe/report.py`
 - Test: `tests/test_report.py`
 
 **Interfaces:**
@@ -2773,10 +2773,10 @@ from pathlib import Path
 
 from rich.console import Console
 
-from llmbench.config import AppConfig, RunConfig, TargetConfig, WorkloadConfig
-from llmbench.metrics import summarize_results
-from llmbench.models import Cell, RequestResult, RunResult, TargetCapability
-from llmbench.report import print_summary, request_to_dict, write_report
+from llmprobe.config import AppConfig, RunConfig, TargetConfig, WorkloadConfig
+from llmprobe.metrics import summarize_results
+from llmprobe.models import Cell, RequestResult, RunResult, TargetCapability
+from llmprobe.report import print_summary, request_to_dict, write_report
 
 
 def make_config(tmp_path: Path) -> AppConfig:
@@ -2902,11 +2902,11 @@ export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 python3 -m pytest tests/test_report.py -q
 ```
 
-Expected: FAIL because `llmbench.report` does not exist.
+Expected: FAIL because `llmprobe.report` does not exist.
 
 - [ ] **Step 3: Implement report generation**
 
-Create `src/llmbench/report.py`:
+Create `src/llmprobe/report.py`:
 
 ```python
 from __future__ import annotations
@@ -2922,8 +2922,8 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
-from llmbench.config import AppConfig
-from llmbench.models import CellSummary, RequestResult, RunResult
+from llmprobe.config import AppConfig
+from llmprobe.models import CellSummary, RequestResult, RunResult
 
 _SENSITIVE_KEYS = {
     "authorization",
@@ -3239,7 +3239,7 @@ def write_report(result: RunResult, config: AppConfig) -> Path:
 
 def print_summary(result: RunResult, console: Console | None = None) -> None:
     output = console or Console()
-    table = Table(title=f"llmbench results: {result.run_id}")
+    table = Table(title=f"llmprobe results: {result.run_id}")
     for column in (
         "Target",
         "Cell",
@@ -3282,7 +3282,7 @@ Expected: all tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/llmbench/report.py tests/test_report.py
+git add src/llmprobe/report.py tests/test_report.py
 git commit -m "feat: write benchmark result reports"
 ```
 
@@ -3291,8 +3291,8 @@ git commit -m "feat: write benchmark result reports"
 ### Task 9: CLI, Mock Server, and End-to-End Flow
 
 **Files:**
-- Create: `src/llmbench/cli.py`
-- Create: `src/llmbench/__main__.py`
+- Create: `src/llmprobe/cli.py`
+- Create: `src/llmprobe/__main__.py`
 - Create: `tests/mock_openai.py`
 - Test: `tests/test_cli.py`
 
@@ -3392,7 +3392,7 @@ from typing import Iterator
 
 import yaml
 
-from llmbench.cli import main
+from llmprobe.cli import main
 from tests.mock_openai import MockOpenAIHandler, MockOpenAIServer
 
 
@@ -3488,11 +3488,11 @@ export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 python3 -m pytest tests/test_cli.py -q
 ```
 
-Expected: FAIL because `llmbench.cli` does not exist.
+Expected: FAIL because `llmprobe.cli` does not exist.
 
 - [ ] **Step 4: Implement the CLI and progress display**
 
-Create `src/llmbench/cli.py`:
+Create `src/llmprobe/cli.py`:
 
 ```python
 from __future__ import annotations
@@ -3504,12 +3504,12 @@ from collections.abc import Sequence
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
-from llmbench import __version__
-from llmbench.config import AppConfig, ConfigError, load_config
-from llmbench.models import Cell, CellSummary, RequestResult
-from llmbench.report import print_summary, write_report
-from llmbench.runner import BenchmarkRunner
-from llmbench.workload import build_cells
+from llmprobe import __version__
+from llmprobe.config import AppConfig, ConfigError, load_config
+from llmprobe.models import Cell, CellSummary, RequestResult
+from llmprobe.report import print_summary, write_report
+from llmprobe.runner import BenchmarkRunner
+from llmprobe.workload import build_cells
 
 
 class RichProgressSink:
@@ -3554,7 +3554,7 @@ class RichProgressSink:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="llmbench", description=__doc__)
+    parser = argparse.ArgumentParser(prog="llmprobe", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -3631,10 +3631,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0 if any(item.success for item in result.requests) else 1
 ```
 
-Create `src/llmbench/__main__.py`:
+Create `src/llmprobe/__main__.py`:
 
 ```python
-from llmbench.cli import main
+from llmprobe.cli import main
 
 raise SystemExit(main())
 ```
@@ -3652,7 +3652,7 @@ Expected: all tests pass. `PYTHONPATH` now includes `.` so `tests.mock_openai` i
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/llmbench/cli.py src/llmbench/__main__.py tests/mock_openai.py tests/test_cli.py
+git add src/llmprobe/cli.py src/llmprobe/__main__.py tests/mock_openai.py tests/test_cli.py
 git commit -m "feat: add CLI and end-to-end benchmark flow"
 ```
 
@@ -3675,7 +3675,7 @@ git commit -m "feat: add CLI and end-to-end benchmark flow"
 Create `README.md` with these sections and exact commands:
 
 ````markdown
-# llmbench
+# llmprobe
 
 多 target、OpenAI-compatible 的 LLM 推理服务性能测试 CLI。用于比较本地 vLLM、llama.cpp、Qwen/DeepSeek 官方 API 和第三方网关的流式服务性能。
 
@@ -3695,9 +3695,9 @@ uv sync --extra dev --extra tokenizer
 
 ```bash
 cp configs/vllm-chat.yaml config.yaml
-uv run llmbench validate config.yaml
-uv run llmbench run config.yaml --dry-run
-uv run llmbench run config.yaml
+uv run llmprobe validate config.yaml
+uv run llmprobe run config.yaml --dry-run
+uv run llmprobe run config.yaml
 ```
 
 结果写入 `results/<run_id>/`：
@@ -3849,8 +3849,8 @@ Expected: exit code 0 with no output.
 
 ```bash
 export PYTHONPATH=".:src:/mnt/4t/code/total_bench/harbor/.venv/lib/python3.13/site-packages"
-python3 -m llmbench --version
-python3 -m llmbench run configs/vllm-chat.yaml --dry-run
+python3 -m llmprobe --version
+python3 -m llmprobe run configs/vllm-chat.yaml --dry-run
 ```
 
 Expected: version `0.1.0`, then a target/cell/request-count summary without network access.

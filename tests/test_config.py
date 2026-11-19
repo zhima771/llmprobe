@@ -3,7 +3,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 
-from llmbench.config import (
+from llmprobe.config import (
     ConfigError,
     load_config,
     resolve_headers,

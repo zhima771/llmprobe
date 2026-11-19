@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from llmbench.config import ConfigError
-from llmbench.tokenization import (
+from llmprobe.config import ConfigError
+from llmprobe.tokenization import (
     available_bundled_tokenizers,
     canonical_tokenizer_key,
     load_tokenizer,
@@ -70,7 +70,7 @@ def test_equivalent_alias_spellings_have_same_canonical_key() -> None:
 
 
 def test_manifest_metadata_and_license_files_are_consistent() -> None:
-    root = Path(__file__).parents[1] / "src" / "llmbench" / "tokenizers"
+    root = Path(__file__).parents[1] / "src" / "llmprobe" / "tokenizers"
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     assert set(manifest["tokenizers"]) == set(available_bundled_tokenizers())
     for entry in manifest["tokenizers"].values():

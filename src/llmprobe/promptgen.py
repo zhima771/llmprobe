@@ -3,10 +3,10 @@ from __future__ import annotations
 import math
 import random
 
-from llmbench.config import ConfigError, WorkloadConfig
-from llmbench.models import Cell, GeneratedPrompt
-from llmbench.tokenization import TextTokenizer
-from llmbench.workload import cell_seed
+from llmprobe.config import ConfigError, WorkloadConfig
+from llmprobe.models import Cell, GeneratedPrompt
+from llmprobe.tokenization import TextTokenizer
+from llmprobe.workload import cell_seed
 
 _WORDS = [
     "alpha",

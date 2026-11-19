@@ -11,10 +11,10 @@ from urllib.parse import parse_qsl, quote, quote_plus, unquote_plus, urlsplit
 
 import httpx
 
-from llmbench.config import TargetConfig, target_url
-from llmbench.models import Cell, GeneratedPrompt, RequestResult
-from llmbench.sse import SSEParser
-from llmbench.tokenization import TextTokenizer
+from llmprobe.config import TargetConfig, target_url
+from llmprobe.models import Cell, GeneratedPrompt, RequestResult
+from llmprobe.sse import SSEParser
+from llmprobe.tokenization import TextTokenizer
 
 
 class TargetProbeError(RuntimeError):

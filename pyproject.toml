@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llmbench"
+name = "llmprobe"
 version = "0.1.0"
-description = "Multi-target OpenAI-compatible LLM serving benchmark"
+description = "Lightweight probe for OpenAI-compatible LLM serving performance"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -21,7 +21,7 @@ tokenizer = ["tokenizers>=0.20", "huggingface-hub>=0.23"]
 dev = ["pytest>=8", "ruff>=0.8"]
 
 [project.scripts]
-llmbench = "llmbench.cli:main"
+llmprobe = "llmprobe.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -36,4 +36,4 @@ line-length = 100
 target-version = "py311"
 
 [tool.setuptools.package-data]
-llmbench = ["tokenizers/*/tokenizer.json", "tokenizers/manifest.json", "tokenizers/README.md", "tokenizers/THIRD_PARTY_NOTICES.md", "tokenizers/licenses/*"]
+llmprobe = ["tokenizers/*/tokenizer.json", "tokenizers/manifest.json", "tokenizers/README.md", "tokenizers/THIRD_PARTY_NOTICES.md", "tokenizers/licenses/*"]

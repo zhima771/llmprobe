@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from llmbench.cli import main
-from llmbench.config import ConfigError, load_config
-from llmbench.models import RunResult, make_run_id
+from llmprobe.cli import main
+from llmprobe.config import ConfigError, load_config
+from llmprobe.models import RunResult, make_run_id
 from tests.mock_openai import MockOpenAIHandler, MockOpenAIServer
 
 
@@ -123,7 +123,7 @@ def test_tokenizer_load_failure_returns_two_for_all_commands(
     def fail_load(spec: str | None) -> None:
         raise ConfigError(f"failed to load tokenizer {spec!r}")
 
-    monkeypatch.setattr("llmbench.runner.load_tokenizer", fail_load)
+    monkeypatch.setattr("llmprobe.runner.load_tokenizer", fail_load)
 
     assert main([command[0], str(config), *command[1:]]) == 2
     assert "tokenizer" in capsys.readouterr().err
@@ -157,7 +157,7 @@ def test_run_phase_config_error_writes_partial_report_and_returns_two(
         def partial_result(self) -> RunResult:
             return partial
 
-    monkeypatch.setattr("llmbench.cli.BenchmarkRunner", LateConfigErrorRunner)
+    monkeypatch.setattr("llmprobe.cli.BenchmarkRunner", LateConfigErrorRunner)
 
     assert main(["run", str(config)]) == 2
     run_data = json.loads(
@@ -234,7 +234,7 @@ def test_run_with_no_successful_requests_returns_one(
         async def run(self) -> RunResult:
             return result
 
-    monkeypatch.setattr("llmbench.cli.BenchmarkRunner", FailedRunner)
+    monkeypatch.setattr("llmprobe.cli.BenchmarkRunner", FailedRunner)
     assert main(["run", str(config)]) == 1
 
 
@@ -249,7 +249,7 @@ def test_unexpected_benchmark_error_returns_one(tmp_path: Path, monkeypatch) -> 
         async def run(self) -> RunResult:
             raise RuntimeError("boom")
 
-    monkeypatch.setattr("llmbench.cli.BenchmarkRunner", BrokenRunner)
+    monkeypatch.setattr("llmprobe.cli.BenchmarkRunner", BrokenRunner)
     assert main(["run", str(config)]) == 1
 
 
@@ -280,7 +280,7 @@ def test_keyboard_interrupt_writes_partial_report_and_returns_130(
         def partial_result(self) -> RunResult:
             return partial
 
-    monkeypatch.setattr("llmbench.cli.BenchmarkRunner", InterruptedRunner)
+    monkeypatch.setattr("llmprobe.cli.BenchmarkRunner", InterruptedRunner)
     assert main(["run", str(config)]) == 130
     run_data = json.loads(
         (tmp_path / "results" / run_id / "run.json").read_text(encoding="utf-8")
@@ -313,8 +313,8 @@ def test_report_write_failure_returns_one(
     def fail_write(result: RunResult, config: object) -> Path:
         raise OSError("disk full")
 
-    monkeypatch.setattr("llmbench.cli.BenchmarkRunner", CompletedRunner)
-    monkeypatch.setattr("llmbench.cli.write_report", fail_write)
+    monkeypatch.setattr("llmprobe.cli.BenchmarkRunner", CompletedRunner)
+    monkeypatch.setattr("llmprobe.cli.write_report", fail_write)
     assert main(["run", str(config)]) == 1
     stderr = capsys.readouterr().err
     assert "report failed" in stderr
@@ -346,11 +346,11 @@ def test_print_summary_failure_returns_one(
     def fail_summary(result: RunResult, console: object) -> None:
         raise RuntimeError("render failed")
 
-    monkeypatch.setattr("llmbench.cli.BenchmarkRunner", CompletedRunner)
+    monkeypatch.setattr("llmprobe.cli.BenchmarkRunner", CompletedRunner)
     monkeypatch.setattr(
-        "llmbench.cli.write_report", lambda result, config: tmp_path / "report"
+        "llmprobe.cli.write_report", lambda result, config: tmp_path / "report"
     )
-    monkeypatch.setattr("llmbench.cli.print_summary", fail_summary)
+    monkeypatch.setattr("llmprobe.cli.print_summary", fail_summary)
     assert main(["run", str(config)]) == 1
     assert "report failed" in capsys.readouterr().err
 
@@ -384,8 +384,8 @@ def test_interrupt_with_report_write_failure_still_returns_130(
     def fail_write(result: RunResult, config: object) -> Path:
         raise OSError("partial disk full")
 
-    monkeypatch.setattr("llmbench.cli.BenchmarkRunner", InterruptedRunner)
-    monkeypatch.setattr("llmbench.cli.write_report", fail_write)
+    monkeypatch.setattr("llmprobe.cli.BenchmarkRunner", InterruptedRunner)
+    monkeypatch.setattr("llmprobe.cli.write_report", fail_write)
     assert main(["run", str(config)]) == 130
     stderr = capsys.readouterr().err
     assert "partial report failed" in stderr

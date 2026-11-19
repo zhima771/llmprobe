@@ -8,15 +8,15 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from llmbench.client import (
+from llmprobe.client import (
     TargetProbeError,
     create_http_client,
     probe_usage,
     stream_request,
 )
-from llmbench.config import AppConfig, TargetConfig, resolve_headers
-from llmbench.metrics import summarize_results
-from llmbench.models import (
+from llmprobe.config import AppConfig, TargetConfig, resolve_headers
+from llmprobe.metrics import summarize_results
+from llmprobe.models import (
     Cell,
     CellSummary,
     GeneratedPrompt,
@@ -25,9 +25,9 @@ from llmbench.models import (
     TargetCapability,
     make_run_id,
 )
-from llmbench.promptgen import generate_prompt
-from llmbench.tokenization import TextTokenizer, canonical_tokenizer_key, load_tokenizer
-from llmbench.workload import build_cells
+from llmprobe.promptgen import generate_prompt
+from llmprobe.tokenization import TextTokenizer, canonical_tokenizer_key, load_tokenizer
+from llmprobe.workload import build_cells
 
 
 class ProgressSink(Protocol):

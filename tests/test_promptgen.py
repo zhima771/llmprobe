@@ -6,10 +6,10 @@ from typing import ClassVar
 
 import pytest
 
-from llmbench.config import ConfigError, WorkloadConfig
-from llmbench.promptgen import generate_prompt
-from llmbench.tokenization import load_tokenizer
-from llmbench.workload import build_cells
+from llmprobe.config import ConfigError, WorkloadConfig
+from llmprobe.promptgen import generate_prompt
+from llmprobe.tokenization import load_tokenizer
+from llmprobe.workload import build_cells
 
 
 class WordTokenizer:

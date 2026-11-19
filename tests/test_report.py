@@ -9,10 +9,10 @@ import pytest
 import yaml
 from rich.console import Console
 
-from llmbench.config import AppConfig, RunConfig, TargetConfig, WorkloadConfig
-from llmbench.metrics import summarize_results
-from llmbench.models import Cell, CellSummary, RequestResult, RunResult, TargetCapability
-from llmbench.report import (
+from llmprobe.config import AppConfig, RunConfig, TargetConfig, WorkloadConfig
+from llmprobe.metrics import summarize_results
+from llmprobe.models import Cell, CellSummary, RequestResult, RunResult, TargetCapability
+from llmprobe.report import (
     config_to_dict,
     print_summary,
     request_to_dict,
@@ -520,7 +520,7 @@ def test_print_summary_renders_the_run_table() -> None:
     print_summary(run, Console(file=stream, force_terminal=False, width=240))
 
     rendered = stream.getvalue()
-    assert "llmbench results: 20260101T000000Z-report-test" in rendered
+    assert "llmprobe results: 20260101T000000Z-report-test" in rendered
     assert "mock" in rendered
     assert "in8-out2-conc1" in rendered
     assert "Decode tok/s" in rendered

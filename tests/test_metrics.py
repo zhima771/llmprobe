@@ -2,8 +2,8 @@ import time
 
 import pytest
 
-from llmbench.metrics import latency_stats, percentile, summarize_results
-from llmbench.models import Cell, RequestResult
+from llmprobe.metrics import latency_stats, percentile, summarize_results
+from llmprobe.models import Cell, RequestResult
 
 
 def result(

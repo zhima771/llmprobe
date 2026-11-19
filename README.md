@@ -1,4 +1,4 @@
-# llmbench
+# llmprobe
 
 多 target、OpenAI-compatible 的 LLM 推理服务性能测试 CLI。用于比较本地 vLLM、llama.cpp、Qwen/DeepSeek 官方 API 和第三方网关的流式服务性能。
 
@@ -18,7 +18,7 @@ uv sync --extra dev --extra tokenizer
 
 ### 内置 tokenizer
 
-`src/llmbench/tokenizers/` 内置了以下常用 tokenizer，可直接使用别名：
+`src/llmprobe/tokenizers/` 内置了以下常用 tokenizer，可直接使用别名：
 
 - `qwen3.8-flash-next`
 - `qwen3.6-35b`
@@ -43,15 +43,15 @@ targets:
 
 `target.tokenizer` 会覆盖 `workload.tokenizer`。相同 tokenizer 的 target 共享同一组 prompt；不同 tokenizer 的 target 会各自生成目标 token 长度的 prompt，因此同一并发下各模型的计算负载更接近。若要求所有 target 接收完全相同的 prompt 文本，只设置全局 `workload.tokenizer`，不要在 target 上覆盖。
 
-内置文件来源、SHA256 和许可证说明见 `src/llmbench/tokenizers/README.md` 与 `manifest.json`。也可以使用 `tokenizer.json` 文件路径、包含 `tokenizer.json` 的模型目录，或 Hugging Face repo id。
+内置文件来源、SHA256 和许可证说明见 `src/llmprobe/tokenizers/README.md` 与 `manifest.json`。也可以使用 `tokenizer.json` 文件路径、包含 `tokenizer.json` 的模型目录，或 Hugging Face repo id。
 
 ## 快速开始
 
 ```bash
 cp configs/vllm-chat.yaml config.yaml
-uv run llmbench validate config.yaml
-uv run llmbench run config.yaml --dry-run
-uv run llmbench run config.yaml
+uv run llmprobe validate config.yaml
+uv run llmprobe run config.yaml --dry-run
+uv run llmprobe run config.yaml
 ```
 
 结果写入 `results/<run_id>/`：
@@ -76,18 +76,18 @@ uv run llmbench run config.yaml
 
 ```bash
 # 1. 单服务
-uv run llmbench validate configs/vllm-chat.yaml
-uv run llmbench run configs/vllm-chat.yaml
+uv run llmprobe validate configs/vllm-chat.yaml
+uv run llmprobe run configs/vllm-chat.yaml
 
 # 2. 多服务对比
 export DEEPSEEK_API_KEY='...'
-uv run llmbench validate configs/compare.yaml
-uv run llmbench run configs/compare.yaml
+uv run llmprobe validate configs/compare.yaml
+uv run llmprobe run configs/compare.yaml
 
 # 3. 每个 target 使用各自 tokenizer
-uv run --extra tokenizer llmbench validate configs/per-target-tokenizers.yaml
-uv run --extra tokenizer llmbench run configs/per-target-tokenizers.yaml --dry-run
-uv run --extra tokenizer llmbench run configs/per-target-tokenizers.yaml
+uv run --extra tokenizer llmprobe validate configs/per-target-tokenizers.yaml
+uv run --extra tokenizer llmprobe run configs/per-target-tokenizers.yaml --dry-run
+uv run --extra tokenizer llmprobe run configs/per-target-tokenizers.yaml
 ```
 
 `per-target-tokenizers.yaml` 中的 `127.0.0.1:8000/8001/8002` 只是占位地址，需要改成实际服务地址。
@@ -290,6 +290,6 @@ uv run ruff check src tests
 
 ```bash
 python3 -m compileall -q src tests
-uv run llmbench --version
-uv run llmbench run configs/vllm-chat.yaml --dry-run
+uv run llmprobe --version
+uv run llmprobe run configs/vllm-chat.yaml --dry-run
 ```

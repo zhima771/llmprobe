@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 
-from llmbench.config import WorkloadConfig
-from llmbench.models import Cell
+from llmprobe.config import WorkloadConfig
+from llmprobe.models import Cell
 
 
 def build_cells(workload: WorkloadConfig) -> list[Cell]:

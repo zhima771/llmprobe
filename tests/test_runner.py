@@ -5,10 +5,10 @@ from typing import Any
 
 import pytest
 
-from llmbench.client import TargetProbeError
-from llmbench.config import AppConfig, ConfigError, RunConfig, TargetConfig, WorkloadConfig
-from llmbench.models import Cell, GeneratedPrompt, RequestResult
-from llmbench.runner import BenchmarkRunner, NullProgress, preflight_workload
+from llmprobe.client import TargetProbeError
+from llmprobe.config import AppConfig, ConfigError, RunConfig, TargetConfig, WorkloadConfig
+from llmprobe.models import Cell, GeneratedPrompt, RequestResult
+from llmprobe.runner import BenchmarkRunner, NullProgress, preflight_workload
 
 
 class FakeClient:
@@ -29,7 +29,7 @@ def fake_http_clients(monkeypatch: pytest.MonkeyPatch) -> list[FakeClient]:
         clients.append(client)
         return client
 
-    monkeypatch.setattr("llmbench.runner.create_http_client", create_client)
+    monkeypatch.setattr("llmprobe.runner.create_http_client", create_client)
     return clients
 
 
@@ -150,8 +150,8 @@ def test_runner_executes_probe_warmup_and_measurement_order(
         )
         return make_result(target.name, cell, repeat, index)
 
-    monkeypatch.setattr("llmbench.runner.probe_usage", fake_probe)
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.probe_usage", fake_probe)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(config(tmp_path), progress=NullProgress(), environ={})
     result = asyncio.run(runner.run())
 
@@ -197,8 +197,8 @@ def test_probe_runs_once_per_target_only_for_auto(
     ) -> RequestResult:
         return make_result(target.name, kwargs["cell"], kwargs["repeat"], kwargs["request_index"])
 
-    monkeypatch.setattr("llmbench.runner.probe_usage", fake_probe)
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.probe_usage", fake_probe)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(
             tmp_path,
@@ -265,8 +265,8 @@ def test_capabilities_and_include_usage_follow_stream_option_mode(
         request_usage_flags.append(kwargs["include_usage"])
         return make_result(target.name, kwargs["cell"], kwargs["repeat"], kwargs["request_index"])
 
-    monkeypatch.setattr("llmbench.runner.probe_usage", fake_probe)
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.probe_usage", fake_probe)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(tmp_path, stream_options=mode, warmup_requests=0, requests_per_cell=1),
         progress=NullProgress(),
@@ -329,7 +329,7 @@ def test_preflight_tokenizer_load_failure_happens_before_client_creation(
     def fail_load(spec: str | None) -> None:
         raise ConfigError(f"failed to load tokenizer {spec!r}")
 
-    monkeypatch.setattr("llmbench.runner.load_tokenizer", fail_load)
+    monkeypatch.setattr("llmprobe.runner.load_tokenizer", fail_load)
     runner = BenchmarkRunner(
         config(tmp_path, stream_options="none", tokenizer="missing-tokenizer"),
         progress=NullProgress(),
@@ -359,8 +359,8 @@ def test_prompts_are_shared_by_targets_with_same_tokenizer(
         seen[(target.name, kwargs["repeat"], kwargs["request_index"])] = prompt
         return make_result(target.name, kwargs["cell"], kwargs["repeat"], kwargs["request_index"])
 
-    monkeypatch.setattr("llmbench.runner.probe_usage", fake_probe)
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.probe_usage", fake_probe)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(
             tmp_path,
@@ -401,7 +401,7 @@ def test_warmup_all_failure_disables_only_that_target_for_remaining_cells(
             success=success,
         )
 
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(
             tmp_path,
@@ -456,8 +456,8 @@ def test_probe_failure_disables_only_that_target(
         measured.append(target.name)
         return make_result(target.name, kwargs["cell"], kwargs["repeat"], kwargs["request_index"])
 
-    monkeypatch.setattr("llmbench.runner.probe_usage", fake_probe)
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.probe_usage", fake_probe)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(tmp_path, warmup_requests=0, requests_per_cell=1),
         progress=NullProgress(),
@@ -499,7 +499,7 @@ def test_requests_use_closed_loop_concurrency_and_measure_queue_wait(
             client_queue_s=kwargs["client_queue_s"],
         )
 
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(
             tmp_path,
@@ -539,8 +539,8 @@ def test_cooldown_occurs_only_after_the_full_cell(
     async def fake_sleep(delay: float) -> None:
         events.append(f"cooldown:{delay}")
 
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
-    monkeypatch.setattr("llmbench.runner.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.asyncio.sleep", fake_sleep)
     runner = BenchmarkRunner(
         config(
             tmp_path,
@@ -585,7 +585,7 @@ def test_partial_result_is_available_while_run_is_still_in_progress(
             await release.wait()
         return make_result(target.name, kwargs["cell"], kwargs["repeat"], kwargs["request_index"])
 
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(tmp_path, stream_options="none", warmup_requests=1),
         progress=NullProgress(),
@@ -620,7 +620,7 @@ def test_partial_result_summarizes_completed_requests_after_run(
     ) -> RequestResult:
         return make_result(target.name, kwargs["cell"], kwargs["repeat"], kwargs["request_index"])
 
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(tmp_path, stream_options="none"),
         progress=NullProgress(),
@@ -669,7 +669,7 @@ def test_preflight_loads_global_and_target_tokenizers(
         calls.append(spec)
         return loaded[spec]  # type: ignore[index]
 
-    monkeypatch.setattr("llmbench.runner.load_tokenizer", fake_load)
+    monkeypatch.setattr("llmprobe.runner.load_tokenizer", fake_load)
     config_with_overrides = config(
         tmp_path,
         tokenizer="global-spec",
@@ -691,7 +691,7 @@ def test_targets_with_different_tokenizers_get_distinct_prompts(
     seen: dict[str, tuple[str, MarkerTokenizer | None]] = {}
 
     monkeypatch.setattr(
-        "llmbench.runner.load_tokenizer",
+        "llmprobe.runner.load_tokenizer",
         lambda spec: loaded[spec],  # type: ignore[index]
     )
 
@@ -709,7 +709,7 @@ def test_targets_with_different_tokenizers_get_distinct_prompts(
             kwargs["request_index"],
         )
 
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(
             tmp_path,
@@ -739,7 +739,7 @@ def test_equivalent_tokenizer_spellings_share_prompt_objects(
         loaded_specs.append(spec)
         return tokenizer
 
-    monkeypatch.setattr("llmbench.runner.load_tokenizer", fake_load)
+    monkeypatch.setattr("llmprobe.runner.load_tokenizer", fake_load)
 
     async def fake_request(
         client: Any,
@@ -755,7 +755,7 @@ def test_equivalent_tokenizer_spellings_share_prompt_objects(
             kwargs["request_index"],
         )
 
-    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    monkeypatch.setattr("llmprobe.runner.stream_request", fake_request)
     runner = BenchmarkRunner(
         config(
             tmp_path,
@@ -778,7 +778,7 @@ def test_injected_tokenizer_still_honors_target_override(
     injected = MarkerTokenizer("i")
     target_override = MarkerTokenizer("t")
     monkeypatch.setattr(
-        "llmbench.runner.load_tokenizer",
+        "llmprobe.runner.load_tokenizer",
         lambda spec: target_override,
     )
     config_with_override = config(

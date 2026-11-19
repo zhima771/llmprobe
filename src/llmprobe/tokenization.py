@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
 
-from llmbench.config import ConfigError
+from llmprobe.config import ConfigError
 
 _BUNDLED_TOKENIZER_ROOT = Path(__file__).with_name("tokenizers")
 _BUNDLED_MANIFEST = _BUNDLED_TOKENIZER_ROOT / "manifest.json"
@@ -152,7 +152,7 @@ def load_tokenizer(spec: str | None) -> TextTokenizer | None:
     except ImportError as exc:
         raise ConfigError(
             "tokenizer support requires the optional dependencies: "
-            "pip install 'llmbench[tokenizer]'"
+            "pip install 'llmprobe[tokenizer]'"
         ) from exc
     try:
         if local_file is not None:

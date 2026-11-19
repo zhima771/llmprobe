@@ -1,4 +1,4 @@
-from llmbench.sse import SSEParser
+from llmprobe.sse import SSEParser
 
 
 def test_parses_fragmented_utf8_and_crlf() -> None:

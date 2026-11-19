@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from llmbench.config import WorkloadConfig
-from llmbench.models import make_run_id
-from llmbench.workload import build_cells, cell_seed
+from llmprobe.config import WorkloadConfig
+from llmprobe.models import make_run_id
+from llmprobe.workload import build_cells, cell_seed
 
 
 def test_build_cells_preserves_config_order() -> None:

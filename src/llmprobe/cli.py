@@ -7,12 +7,12 @@ from typing import Self
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
-from llmbench import __version__
-from llmbench.config import AppConfig, ConfigError, load_config, sanitize_url
-from llmbench.models import Cell, CellSummary, RequestResult
-from llmbench.report import print_summary, write_report
-from llmbench.runner import BenchmarkRunner, preflight_workload
-from llmbench.workload import build_cells
+from llmprobe import __version__
+from llmprobe.config import AppConfig, ConfigError, load_config, sanitize_url
+from llmprobe.models import Cell, CellSummary, RequestResult
+from llmprobe.report import print_summary, write_report
+from llmprobe.runner import BenchmarkRunner, preflight_workload
+from llmprobe.workload import build_cells
 
 
 class RichProgressSink:
@@ -57,7 +57,7 @@ class RichProgressSink:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="llmbench", description=__doc__)
+    parser = argparse.ArgumentParser(prog="llmprobe", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 

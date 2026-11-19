@@ -234,7 +234,7 @@ wheels = [
 ]
 
 [[package]]
-name = "llmbench"
+name = "llmprobe"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

@@ -1,6 +1,6 @@
 # Bundled Tokenizers
 
-这些 `tokenizer.json` 用于 `llmbench` 的 vLLM 风格 `random` prompt 生成。
+这些 `tokenizer.json` 用于 `llmprobe` 的 vLLM 风格 `random` prompt 生成。
 工具只读取 tokenizer 元数据，不会加载模型权重。
 
 可用别名：

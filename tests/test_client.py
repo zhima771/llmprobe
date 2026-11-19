@@ -5,15 +5,15 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 
-from llmbench.client import (
+from llmprobe.client import (
     TargetProbeError,
     build_payload,
     create_http_client,
     probe_usage,
     stream_request,
 )
-from llmbench.config import TargetConfig
-from llmbench.models import Cell, GeneratedPrompt, RequestResult
+from llmprobe.config import TargetConfig
+from llmprobe.models import Cell, GeneratedPrompt, RequestResult
 
 
 class ChunkStream(httpx.AsyncByteStream):

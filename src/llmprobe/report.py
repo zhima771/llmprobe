@@ -13,8 +13,8 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
-from llmbench.config import AppConfig, sanitize_url
-from llmbench.models import CellSummary, RequestResult, RunResult
+from llmprobe.config import AppConfig, sanitize_url
+from llmprobe.models import CellSummary, RequestResult, RunResult
 
 _REDACTED = "<redacted>"
 _ENV_PLACEHOLDER_ONLY = re.compile(
@@ -398,7 +398,7 @@ def write_report(result: RunResult, config: AppConfig) -> Path:
 
 def print_summary(result: RunResult, console: Console | None = None) -> None:
     output = console or Console()
-    table = Table(title=f"llmbench results: {result.run_id}")
+    table = Table(title=f"llmprobe results: {result.run_id}")
     for column in (
         "Target",
         "Cell",

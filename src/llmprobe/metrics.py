@@ -4,7 +4,7 @@ import math
 import statistics
 from collections import Counter
 
-from llmbench.models import Cell, CellSummary, LatencyStats, RequestResult
+from llmprobe.models import Cell, CellSummary, LatencyStats, RequestResult
 
 
 def percentile(values: list[float], p: float) -> float | None:
