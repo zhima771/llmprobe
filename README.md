@@ -57,8 +57,8 @@ uv run llmbench run config.yaml
 结果写入 `results/<run_id>/`：
 
 - `config.effective.yaml`：脱敏后的有效配置
-- `summary.csv`：每个 target/cell/repeat 一行
-- `summary.json`：明细与跨 repeat 聚合
+- `summary.csv`：每个 target/cell 一行
+- `summary.json`：每个 target/cell 的聚合明细
 - `requests.jsonl`：请求级数据
 - `summary.md`：可读报告
 - `run.json`：配置能力、运行元数据
@@ -101,7 +101,6 @@ run:
   name: my-run
   seed: 42
   output_dir: results
-  repeats: 1
   cooldown_s: 2
   save_generated_text: false
   save_itl: false
@@ -110,7 +109,7 @@ workload:
   dataset: random
   requests_per_cell: 16
   warmup_requests: 2
-  concurrencies: [1, 2, 4]
+  concurrency: [1, 2, 4]
   input_lengths: [512]
   output_lengths: [128]
   system_prompt: ""
@@ -124,6 +123,7 @@ targets:
     model: Qwen/Qwen3-8B
     tokenizer: qwen3.6-35b
     api_key_env: null
+    api_key: null
     headers: {}
     timeout_s: 300
     max_tokens_field: max_tokens
@@ -141,8 +141,7 @@ targets:
 | `name` | `run` | 运行名称，用于生成 `results/<run_id>/` 目录 |
 | `seed` | `42` | prompt 随机种子；相同 seed 和配置可复现 prompt |
 | `output_dir` | `results` | 结果根目录 |
-| `repeats` | `1` | 每个 target × cell 的正式重复测量轮数；每轮使用不同 prompt 集 |
-| `cooldown_s` | `0` | 每个 cell 的全部 target/repeat 完成后等待秒数 |
+| `cooldown_s` | `0` | 每个 cell 的全部 target 完成后等待秒数 |
 | `save_generated_text` | `false` | 是否把模型生成文本写入 `requests.jsonl`；可能包含敏感内容 |
 | `save_itl` | `false` | 是否写入完整 ITL 序列；高并发/长输出时文件会明显变大 |
 
@@ -151,20 +150,32 @@ targets:
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `dataset` | `random` | v1 仅支持 `random`，使用 vLLM 风格确定性随机 prompt |
-| `requests_per_cell` | `50` | 每个 target × cell × repeat 的正式请求数；必须 ≥ 最大并发 |
+| `requests_per_cell` | `50` | 每个 target × cell 的正式请求数；必须 ≥ 最大并发 |
 | `warmup_requests` | `2` | 每个 target × cell 的预热请求数；不计入指标；`0` 表示关闭 |
-| `concurrencies` | `[1]` | closed-loop 并发扫描列表 |
+| `concurrency` | `[1]` | closed-loop 并发扫描列表 |
 | `input_lengths` | `[512]` | 输入内容 token 数目标列表；包含 system prompt，不含 chat template |
 | `output_lengths` | `[128]` | 生成 token 数上限列表；实际输出可能因 EOS 提前结束 |
 | `system_prompt` | `""` | 可选 system prompt，会计入输入 token 预算 |
 | `tokenizer` | `null` | 全局参考 tokenizer，可用内置别名、`tokenizer.json`、模型目录或 HF repo id |
 | `stream_options` | `auto` | `auto`：probe 探测 usage；`include_usage`：强制发送；`none`：关闭 |
 
-Cell 由 `concurrency × input_length × output_length` 决定，ID 形如 `i512-o128-c4`。`repeats` 是同一 cell 的独立重复测量，不是 warmup。请求数计算：
+`workload.concurrency` 是并发扫描参数。Cell 由 `concurrency × input_length × output_length` 决定，ID 形如：
 
 ```text
-cell 数 = len(concurrencies) × len(input_lengths) × len(output_lengths)
-正式请求 = cell 数 × target 数 × repeats × requests_per_cell
+in512-out128-conc4
+```
+
+含义分别是：
+
+- `in512`：目标输入内容 512 tokens
+- `out128`：最大输出 128 tokens
+- `conc4`：并发 4
+
+每次配置运行对每个 cell 正式测量一次；需要独立重复时，重新运行配置即可。请求数计算：
+
+```text
+cell 数 = len(concurrency) × len(input_lengths) × len(output_lengths)
+正式请求 = cell 数 × target 数 × requests_per_cell
 预热请求 = cell 数 × target 数 × warmup_requests
 ```
 
@@ -177,7 +188,8 @@ cell 数 = len(concurrencies) × len(input_lengths) × len(output_lengths)
 | `base_url` | 是 | API base，通常包含 `/v1`；工具会追加对应 endpoint |
 | `model` | 是 | 服务端实际模型名；显示名和权重名不一致时以服务端为准 |
 | `tokenizer` | 否 | 覆盖 `workload.tokenizer`；建议使用实际权重对应的 tokenizer |
-| `api_key_env` | 否 | 读取 API Key 的环境变量名；不建议把 Key 写入 YAML |
+| `api_key_env` | 否 | 读取 API Key 的环境变量名（推荐） |
+| `api_key` | 否 | 直接在 YAML 中填写 API Key；使用方便但不推荐，结果文件会自动脱敏 |
 | `headers` | 否 | 额外 HTTP Header；支持 `${ENV_VAR}` 展开 |
 | `timeout_s` | 否 | 单请求总超时，默认 `300` 秒 |
 | `max_tokens_field` | 否 | 发送 `max_tokens`（默认）或 `max_completion_tokens` |
@@ -194,7 +206,17 @@ cell 数 = len(concurrencies) × len(input_lengths) × len(output_lengths)
 export DEEPSEEK_API_KEY='...'
 ```
 
-`api_key_env` 只保存环境变量名，配置文件和结果文件都不会写入解析后的 Key。`headers` 中的 `${VAR}` 同样在运行时展开；持久化配置只保留未展开的纯占位符。
+推荐使用 `api_key_env`。如果环境变量不方便，也可以直接写 `api_key`：
+
+```yaml
+targets:
+  - name: gateway
+    base_url: http://127.0.0.1:8000/v1
+    model: qwen-3.6-35b
+    api_key: sk-your-key
+```
+
+直接写 `api_key` 会把明文留在 YAML 源文件中，因此要注意文件权限和版本控制；`config.effective.yaml`、`run.json` 等结果文件中的 `api_key` 会被替换为 `<redacted>`。不能同时设置 `api_key` 和 `api_key_env`，也不能同时设置 API Key 和 `Authorization` header。
 
 如果 `ALL_PROXY` 使用非标准 `socks://`，访问非 loopback 服务前请改为 `socks5://host:port` 或 unset；loopback 地址会自动忽略代理。URL query 值会在 dry-run 和持久化配置中脱敏，不要把密钥放在 URL path 或 query key 中。
 
@@ -204,7 +226,6 @@ export DEEPSEEK_API_KEY='...'
 |---|---|
 | `Target` | target 名称 |
 | `Cell` | 输入/输出/并发组合 |
-| `Repeat` | 重复轮次 |
 | `OK/Err` | 成功/失败请求数 |
 | `Req/s` | 请求吞吐 |
 | `Out tok/s` | 所有并发请求的聚合输出 token 吞吐 |
@@ -234,7 +255,7 @@ export DEEPSEEK_API_KEY='...'
 - `workload.tokenizer` 是全局参考 tokenizer；`targets[].tokenizer` 可覆盖它。tokenizer 只用于构造 prompt 和估算，实际输入/输出 token 数优先采用各服务的 usage，并记录 token count source 与 `estimated` 标记。
 - 使用内置别名时不需要复制模型权重；只需要 `tokenizer.json`。
 - `random-range-ratio` 在 v1 中尚未实现；同一 cell 的 `input_lengths` / `output_lengths` 是固定目标值，不是随机区间。
-- `concurrencies`、`input_lengths`、`output_lengths` 是扫描列表。
+- `concurrency`、`input_lengths`、`output_lengths` 是扫描列表。
 - `requests_per_cell` 必须不小于最大并发。
 - `warmup_requests` 按 target × cell 执行，不计入结果。
 - `stream_options: auto` 会用一个排除在正式结果外的 probe 探测 usage 支持；`include_usage` 强制发送，`none` 强制关闭。

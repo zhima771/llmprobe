@@ -17,7 +17,7 @@ run:
   output_dir: results
 workload:
   requests_per_cell: 4
-  concurrencies: [1, 2]
+  concurrency: [1, 2]
   input_lengths: [16]
   output_lengths: [8]
 targets:
@@ -36,7 +36,6 @@ def write_config(tmp_path: Path, text: str) -> Path:
 def test_load_minimal_config_applies_defaults(tmp_path: Path) -> None:
     config = load_config(write_config(tmp_path, MINIMAL), environ={})
     assert config.run.name == "smoke"
-    assert config.run.repeats == 1
     assert config.workload.stream_options == "auto"
     assert config.workload.dataset == "random"
     assert config.targets[0].backend == "openai-chat"
@@ -66,7 +65,7 @@ def test_reserved_request_param_is_rejected(tmp_path: Path) -> None:
 
 
 def test_max_concurrency_cannot_exceed_requests_per_cell(tmp_path: Path) -> None:
-    text = MINIMAL.replace("concurrencies: [1, 2]", "concurrencies: [8]")
+    text = MINIMAL.replace("concurrency: [1, 2]", "concurrency: [8]")
     with pytest.raises(ConfigError, match="requests_per_cell"):
         load_config(write_config(tmp_path, text), environ={})
 
@@ -241,3 +240,25 @@ def test_target_tokenizer_override_is_parsed(tmp_path: Path) -> None:
     )
     config = load_config(write_config(tmp_path, text), environ={})
     assert config.targets[0].tokenizer == "qwen3.6-35b"
+
+
+def test_repeats_is_no_longer_supported(tmp_path: Path) -> None:
+    text = MINIMAL.replace("run:\n  name: smoke\n", "run:\n  name: smoke\n  repeats: 2\n")
+    with pytest.raises(ConfigError, match="repeats"):
+        load_config(write_config(tmp_path, text), environ={})
+
+
+def test_direct_api_key_is_supported_and_env_conflict_is_rejected(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "    model: test-model\n",
+        "    model: test-model\n    api_key: sk-direct\n",
+    )
+    config = load_config(write_config(tmp_path, text), environ={})
+    assert config.targets[0].api_key == "sk-direct"
+    assert resolve_headers(config.targets[0], environ={}) == {
+        "Authorization": "Bearer sk-direct"
+    }
+
+    conflict = text.replace("    api_key: sk-direct\n", "    api_key: sk-direct\n    api_key_env: TEST_KEY\n")
+    with pytest.raises(ConfigError, match="api_key"):
+        load_config(write_config(tmp_path, conflict), environ={"TEST_KEY": "env-key"})

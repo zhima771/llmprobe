@@ -37,11 +37,10 @@ def config(
     tmp_path: Path,
     *,
     stream_options: str = "auto",
-    repeats: int = 1,
     cooldown_s: float = 0.0,
     warmup_requests: int = 1,
     requests_per_cell: int = 2,
-    concurrencies: tuple[int, ...] = (1,),
+    concurrency: tuple[int, ...] = (1,),
     input_lengths: tuple[int, ...] = (8,),
     output_lengths: tuple[int, ...] = (2,),
     system_prompt: str = "",
@@ -52,13 +51,12 @@ def config(
         run=RunConfig(
             name="test",
             output_dir=tmp_path,
-            repeats=repeats,
             cooldown_s=cooldown_s,
         ),
         workload=WorkloadConfig(
             requests_per_cell=requests_per_cell,
             warmup_requests=warmup_requests,
-            concurrencies=concurrencies,
+            concurrency=concurrency,
             input_lengths=input_lengths,
             output_lengths=output_lengths,
             system_prompt=system_prompt,
@@ -160,12 +158,12 @@ def test_runner_executes_probe_warmup_and_measurement_order(
     assert calls == [
         ("a", "probe", "probe", -1, 0),
         ("b", "probe", "probe", -1, 0),
-        ("a", "warmup", "i8-o2-c1", -1, 0),
-        ("b", "warmup", "i8-o2-c1", -1, 0),
-        ("a", "measure", "i8-o2-c1", 0, 0),
-        ("a", "measure", "i8-o2-c1", 0, 1),
-        ("b", "measure", "i8-o2-c1", 0, 0),
-        ("b", "measure", "i8-o2-c1", 0, 1),
+        ("a", "warmup", "in8-out2-conc1", -1, 0),
+        ("b", "warmup", "in8-out2-conc1", -1, 0),
+        ("a", "measure", "in8-out2-conc1", 0, 0),
+        ("a", "measure", "in8-out2-conc1", 0, 1),
+        ("b", "measure", "in8-out2-conc1", 0, 0),
+        ("b", "measure", "in8-out2-conc1", 0, 1),
     ]
     assert len(result.summaries) == 2
     assert len(result.requests) == 4
@@ -204,7 +202,6 @@ def test_probe_runs_once_per_target_only_for_auto(
     runner = BenchmarkRunner(
         config(
             tmp_path,
-            repeats=2,
             warmup_requests=0,
             requests_per_cell=1,
             input_lengths=(8, 16),
@@ -345,7 +342,7 @@ def test_preflight_tokenizer_load_failure_happens_before_client_creation(
     assert fake_http_clients == []
 
 
-def test_prompts_are_shared_by_targets_and_fresh_per_repeat(
+def test_prompts_are_shared_by_targets_with_same_tokenizer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen: dict[tuple[str, int, int], GeneratedPrompt] = {}
@@ -368,7 +365,6 @@ def test_prompts_are_shared_by_targets_and_fresh_per_repeat(
         config(
             tmp_path,
             stream_options="none",
-            repeats=2,
             warmup_requests=1,
             requests_per_cell=1,
         ),
@@ -378,9 +374,8 @@ def test_prompts_are_shared_by_targets_and_fresh_per_repeat(
     asyncio.run(runner.run())
 
     assert seen[("a", 0, 0)] is seen[("b", 0, 0)]
-    assert seen[("a", 1, 0)] is seen[("b", 1, 0)]
-    assert seen[("a", 0, 0)] != seen[("a", 1, 0)]
-    assert seen[("a", -1, 0)] != seen[("a", 0, 0)]
+    assert seen[("a", -1, 0)].user == seen[("b", -1, 0)].user
+    assert seen[("a", -1, 0)].user != seen[("a", 0, 0)].user
 
 
 def test_warmup_all_failure_disables_only_that_target_for_remaining_cells(
@@ -420,20 +415,20 @@ def test_warmup_all_failure_disables_only_that_target_for_remaining_cells(
     )
     result = asyncio.run(runner.run())
 
-    assert [item for item in calls if item[0] == "a"] == [("a", "i8-o2-c1", -1)]
+    assert [item for item in calls if item[0] == "a"] == [("a", "in8-out2-conc1", -1)]
     assert [item for item in calls if item[0] == "b"] == [
-        ("b", "i8-o2-c1", -1),
-        ("b", "i8-o2-c1", 0),
-        ("b", "i16-o2-c1", -1),
-        ("b", "i16-o2-c1", 0),
+        ("b", "in8-out2-conc1", -1),
+        ("b", "in8-out2-conc1", 0),
+        ("b", "in16-out2-conc1", -1),
+        ("b", "in16-out2-conc1", 0),
     ]
     capabilities = {item.name: item for item in result.capabilities}
     assert capabilities["a"].available is False
     assert capabilities["a"].error is not None
     assert capabilities["b"].available is True
     assert [(item.target, item.cell_id) for item in result.requests] == [
-        ("b", "i8-o2-c1"),
-        ("b", "i16-o2-c1"),
+        ("b", "in8-out2-conc1"),
+        ("b", "in16-out2-conc1"),
     ]
 
 
@@ -511,7 +506,7 @@ def test_requests_use_closed_loop_concurrency_and_measure_queue_wait(
             stream_options="none",
             warmup_requests=0,
             requests_per_cell=3,
-            concurrencies=(2,),
+            concurrency=(2,),
         ),
         progress=NullProgress(),
         environ={},
@@ -550,7 +545,6 @@ def test_cooldown_occurs_only_after_the_full_cell(
         config(
             tmp_path,
             stream_options="none",
-            repeats=2,
             cooldown_s=0.25,
             warmup_requests=1,
             requests_per_cell=1,
@@ -562,19 +556,15 @@ def test_cooldown_occurs_only_after_the_full_cell(
     asyncio.run(runner.run())
 
     assert events == [
-        "request:a:i8-o2-c1:-1",
-        "request:b:i8-o2-c1:-1",
-        "request:a:i8-o2-c1:0",
-        "request:b:i8-o2-c1:0",
-        "request:a:i8-o2-c1:1",
-        "request:b:i8-o2-c1:1",
+        "request:a:in8-out2-conc1:-1",
+        "request:b:in8-out2-conc1:-1",
+        "request:a:in8-out2-conc1:0",
+        "request:b:in8-out2-conc1:0",
         "cooldown:0.25",
-        "request:a:i16-o2-c1:-1",
-        "request:b:i16-o2-c1:-1",
-        "request:a:i16-o2-c1:0",
-        "request:b:i16-o2-c1:0",
-        "request:a:i16-o2-c1:1",
-        "request:b:i16-o2-c1:1",
+        "request:a:in16-out2-conc1:-1",
+        "request:b:in16-out2-conc1:-1",
+        "request:a:in16-out2-conc1:0",
+        "request:b:in16-out2-conc1:0",
     ]
 
 

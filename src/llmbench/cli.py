@@ -38,7 +38,7 @@ class RichProgressSink:
     def cell_started(self, target: str, cell: Cell, repeat: int) -> None:
         self.progress.update(
             self.task_id,
-            description=f"{target} {cell.id} repeat={repeat} c={cell.concurrency}",
+            description=f"{target} {cell.id}",
         )
 
     def request_finished(self, result: RequestResult) -> None:
@@ -46,7 +46,7 @@ class RichProgressSink:
 
     def cell_finished(self, summary: CellSummary) -> None:
         self.console.print(
-            f"[cyan]{summary.target}[/cyan] {summary.cell_id} r={summary.repeat}: "
+            f"[cyan]{summary.target}[/cyan] {summary.cell_id}: "
             f"{summary.completed} ok / {summary.failed} failed, "
             f"{summary.request_throughput:.2f} req/s, "
             f"{summary.output_token_throughput or 0:.2f} out tok/s"
@@ -75,7 +75,6 @@ def _formal_total(config: AppConfig) -> int:
     return (
         len(cells)
         * len(config.targets)
-        * config.run.repeats
         * config.workload.requests_per_cell
     )
 

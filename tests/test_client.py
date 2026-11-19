@@ -54,7 +54,7 @@ def prompt() -> GeneratedPrompt:
 
 
 def cell() -> Cell:
-    return Cell(id="i5-o3-c1", concurrency=1, input_length=5, output_length=3)
+    return Cell(id="in5-out3-conc1", concurrency=1, input_length=5, output_length=3)
 
 
 def force_percent_encode(value: str) -> str:

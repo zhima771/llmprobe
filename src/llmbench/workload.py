@@ -10,10 +10,10 @@ def build_cells(workload: WorkloadConfig) -> list[Cell]:
     cells: list[Cell] = []
     for input_length in workload.input_lengths:
         for output_length in workload.output_lengths:
-            for concurrency in workload.concurrencies:
+            for concurrency in workload.concurrency:
                 cells.append(
                     Cell(
-                        id=f"i{input_length}-o{output_length}-c{concurrency}",
+                        id=f"in{input_length}-out{output_length}-conc{concurrency}",
                         concurrency=concurrency,
                         input_length=input_length,
                         output_length=output_length,

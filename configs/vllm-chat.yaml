@@ -2,7 +2,6 @@ run:
   name: vllm-local
   seed: 42
   output_dir: results
-  repeats: 1
   cooldown_s: 2
   save_generated_text: false
   save_itl: false
@@ -11,7 +10,7 @@ workload:
   dataset: random
   requests_per_cell: 60
   warmup_requests: 3
-  concurrencies: [1, 2, 4, 8]
+  concurrency: [1, 2, 4, 8]
   input_lengths: [128, 1024]
   output_lengths: [128]
   system_prompt: ""

@@ -18,7 +18,7 @@ def result(
 ) -> RequestResult:
     return RequestResult(
         target="mock",
-        cell_id="i4-o2-c2",
+        cell_id="in4-out2-conc2",
         repeat=0,
         request_index=0,
         concurrency=2,
@@ -65,7 +65,7 @@ def test_latency_stats_reports_population_stddev() -> None:
 
 
 def test_summarize_results_calculates_throughput() -> None:
-    cell = Cell(id="i4-o2-c2", concurrency=2, input_length=4, output_length=2)
+    cell = Cell(id="in4-out2-conc2", concurrency=2, input_length=4, output_length=2)
     results = [
         result(started_at=100.0, stream_end_s=0.6),
         result(started_at=100.5, stream_end_s=0.5, output_tokens=5, input_tokens=20),
@@ -84,7 +84,7 @@ def test_summarize_results_calculates_throughput() -> None:
 
 
 def test_duration_uses_stream_end_instead_of_last_token() -> None:
-    cell = Cell(id="i4-o2-c1", concurrency=1, input_length=4, output_length=2)
+    cell = Cell(id="in4-out2-conc1", concurrency=1, input_length=4, output_length=2)
     summary = summarize_results(
         [result(started_at=100.0, stream_end_s=0.8, e2el_s=0.5)], cell, "mock", 0
     )
@@ -92,7 +92,7 @@ def test_duration_uses_stream_end_instead_of_last_token() -> None:
 
 
 def test_throughput_counts_only_successful_requests() -> None:
-    cell = Cell(id="i4-o2-c1", concurrency=1, input_length=4, output_length=2)
+    cell = Cell(id="in4-out2-conc1", concurrency=1, input_length=4, output_length=2)
     results = [
         result(started_at=100.0, stream_end_s=0.5, input_tokens=10),
         result(
@@ -111,7 +111,7 @@ def test_throughput_counts_only_successful_requests() -> None:
 
 
 def test_peak_concurrency_uses_half_open_intervals() -> None:
-    cell = Cell(id="i4-o2-c2", concurrency=2, input_length=4, output_length=2)
+    cell = Cell(id="in4-out2-conc2", concurrency=2, input_length=4, output_length=2)
     results = [
         result(started_at=100.0, stream_end_s=0.5),
         result(started_at=100.5, stream_end_s=0.5),
@@ -121,7 +121,7 @@ def test_peak_concurrency_uses_half_open_intervals() -> None:
 
 
 def test_total_throughput_is_none_when_input_tokens_are_unknown() -> None:
-    cell = Cell(id="i4-o2-c1", concurrency=1, input_length=4, output_length=2)
+    cell = Cell(id="in4-out2-conc1", concurrency=1, input_length=4, output_length=2)
     summary = summarize_results(
         [result(started_at=time.perf_counter(), stream_end_s=0.5, input_tokens=None)],
         cell,
@@ -133,7 +133,7 @@ def test_total_throughput_is_none_when_input_tokens_are_unknown() -> None:
 
 
 def test_all_failed_requests_do_not_produce_latency_stats() -> None:
-    cell = Cell(id="i4-o2-c1", concurrency=1, input_length=4, output_length=2)
+    cell = Cell(id="in4-out2-conc1", concurrency=1, input_length=4, output_length=2)
     summary = summarize_results(
         [result(started_at=100.0, stream_end_s=0.2, success=False)], cell, "mock", 0
     )

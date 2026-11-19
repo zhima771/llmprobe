@@ -36,7 +36,6 @@ class RunConfig:
     name: str = "run"
     seed: int = 42
     output_dir: Path = Path("results")
-    repeats: int = 1
     cooldown_s: float = 0.0
     save_generated_text: bool = False
     save_itl: bool = False
@@ -47,7 +46,7 @@ class WorkloadConfig:
     dataset: Literal["random"] = "random"
     requests_per_cell: int = 50
     warmup_requests: int = 2
-    concurrencies: tuple[int, ...] = (1,)
+    concurrency: tuple[int, ...] = (1,)
     input_lengths: tuple[int, ...] = (512,)
     output_lengths: tuple[int, ...] = (128,)
     system_prompt: str = ""
@@ -62,6 +61,7 @@ class TargetConfig:
     model: str
     backend: Literal["openai-chat", "openai-completions"] = "openai-chat"
     api_key_env: str | None = None
+    api_key: str | None = None
     tokenizer: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     timeout_s: float = 300.0
@@ -143,14 +143,13 @@ def _parse_run(raw: Any) -> RunConfig:
     data = _mapping(raw, "run")
     _unknown_keys(
         data,
-        {"name", "seed", "output_dir", "repeats", "cooldown_s", "save_generated_text", "save_itl"},
+        {"name", "seed", "output_dir", "cooldown_s", "save_generated_text", "save_itl"},
         "run",
     )
     return RunConfig(
         name=_string(data.get("name", "run"), "run.name"),
         seed=_integer(data.get("seed", 42), "run.seed", minimum=0),
         output_dir=Path(_string(data.get("output_dir", "results"), "run.output_dir")),
-        repeats=_integer(data.get("repeats", 1), "run.repeats", minimum=1),
         cooldown_s=_number(data.get("cooldown_s", 0.0), "run.cooldown_s", minimum=0.0),
         save_generated_text=_boolean(
             data.get("save_generated_text", False), "run.save_generated_text"
@@ -167,7 +166,7 @@ def _parse_workload(raw: Any) -> WorkloadConfig:
             "dataset",
             "requests_per_cell",
             "warmup_requests",
-            "concurrencies",
+            "concurrency",
             "input_lengths",
             "output_lengths",
             "system_prompt",
@@ -193,7 +192,7 @@ def _parse_workload(raw: Any) -> WorkloadConfig:
         warmup_requests=_integer(
             data.get("warmup_requests", 2), "workload.warmup_requests", minimum=0
         ),
-        concurrencies=_int_tuple(data.get("concurrencies", [1]), "workload.concurrencies"),
+        concurrency=_int_tuple(data.get("concurrency", [1]), "workload.concurrency"),
         input_lengths=_int_tuple(data.get("input_lengths", [512]), "workload.input_lengths"),
         output_lengths=_int_tuple(data.get("output_lengths", [128]), "workload.output_lengths"),
         system_prompt=_string(
@@ -215,6 +214,7 @@ def _parse_target(raw: Any, index: int) -> TargetConfig:
             "base_url",
             "model",
             "api_key_env",
+            "api_key",
             "tokenizer",
             "headers",
             "timeout_s",
@@ -245,12 +245,19 @@ def _parse_target(raw: Any, index: int) -> TargetConfig:
     api_key_env = data.get("api_key_env")
     if api_key_env is not None:
         api_key_env = _string(api_key_env, f"{path}.api_key_env")
+    api_key = data.get("api_key")
+    if api_key is not None:
+        api_key = _string(api_key, f"{path}.api_key")
+    if api_key_env and api_key:
+        raise ConfigError(f"{path} cannot set both api_key_env and api_key")
     tokenizer = data.get("tokenizer")
     if tokenizer is not None:
         tokenizer = _string(tokenizer, f"{path}.tokenizer")
     headers = _string_map(data.get("headers", {}), f"{path}.headers")
-    if api_key_env and any(key.lower() == "authorization" for key in headers):
-        raise ConfigError(f"{path} cannot set both api_key_env and Authorization header")
+    if (api_key_env or api_key) and any(
+        key.lower() == "authorization" for key in headers
+    ):
+        raise ConfigError(f"{path} cannot set both an API key and Authorization header")
     request_params = dict(_mapping(data.get("request_params", {}), f"{path}.request_params"))
     reserved = sorted(_RESERVED_REQUEST_KEYS.intersection(request_params))
     if reserved:
@@ -264,6 +271,7 @@ def _parse_target(raw: Any, index: int) -> TargetConfig:
         base_url=base_url,
         model=_string(data.get("model"), f"{path}.model"),
         api_key_env=api_key_env,
+        api_key=api_key,
         tokenizer=tokenizer,
         headers=headers,
         timeout_s=_number(data.get("timeout_s", 300.0), f"{path}.timeout_s", minimum=0.001),
@@ -305,7 +313,7 @@ def load_config(
     names = [target.name for target in targets]
     if len(names) != len(set(names)):
         raise ConfigError("target names must be unique")
-    max_concurrency = max(workload.concurrencies)
+    max_concurrency = max(workload.concurrency)
     if max_concurrency > workload.requests_per_cell:
         raise ConfigError(
             "workload.requests_per_cell must be >= the largest concurrency "
@@ -341,6 +349,8 @@ def resolve_headers(
                 f"environment variable {target.api_key_env} is required by target {target.name}"
             )
         headers["Authorization"] = f"Bearer {value}"
+    elif target.api_key:
+        headers["Authorization"] = f"Bearer {target.api_key}"
     return headers
 
 

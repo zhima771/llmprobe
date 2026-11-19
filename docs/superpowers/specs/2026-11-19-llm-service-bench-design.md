@@ -65,7 +65,7 @@ llmbench validate configs/compare.yaml
 ```
 
 - `run`：校验配置、打印待执行矩阵、执行 warmup 和正式测量、即时显示进度、落盘结果并在终端打印汇总。
-- `--dry-run`：只展开并打印 target × workload × repeat 矩阵，不建立连接。
+- `--dry-run`：只展开并打印 target × workload 矩阵，不建立连接。
 - `validate`：只做配置和 URL 校验。
 - 默认输出目录为 `results/`，每次运行生成独立的 `run_id` 子目录。
 - 有配置错误时退出码为 2；全部 target/cell 失败时退出码为 1；至少一个 cell 有成功请求时退出码为 0，即使存在部分失败。
@@ -80,7 +80,6 @@ run:
   name: qwen-compare
   seed: 42
   output_dir: results
-  repeats: 1
   cooldown_s: 2
   save_generated_text: false
   save_itl: false
@@ -89,7 +88,7 @@ workload:
   dataset: random
   requests_per_cell: 60
   warmup_requests: 3
-  concurrencies: [1, 2, 4, 8]
+  concurrency: [1, 2, 4, 8]
   input_lengths: [128, 1024]
   output_lengths: [128, 512]
   system_prompt: ""
@@ -130,7 +129,6 @@ targets:
 - `requests_per_cell` 必须大于等于最大并发。
 - `dataset` 第一版仅支持 `random`，默认 `random`。
 - `warmup_requests` 不计入任何聚合指标，按 target × cell 执行，详细语义见 6.4。
-- `repeats` 为每个 workload cell 的正式测量轮数。
 - `input_lengths` 是目标“内容 token 数”，包含 `system_prompt`，但不包含 chat template 和特殊 token。chat target 将 system prompt 放入 system message；completions target 将 system prompt 与实际 prompt 拼接。若已知 system prompt 已超过目标长度，配置校验失败。
 - `output_lengths` 是生成 token 数上限。没有 tokenizer 时输入长度按确定性文本长度近似；所有实际 token 数优先采用服务端 usage，并记录来源。
 - `workload.tokenizer` 是全局参考 tokenizer，可指向内置别名、本地 `tokenizer.json`、包含 `tokenizer.json` 的模型目录，或 HF repo id。默认安装不强制引入 tokenizer 依赖，缺省时使用内置的确定性文本生成器。
@@ -153,19 +151,18 @@ workload cell 为：
 (concurrency, input_length, output_length)
 ```
 
-每次正式测量是该 cell 下的 `(target, repeat)` 组合。执行顺序为：
+每次正式测量是该 cell 下的一个 target。执行顺序为：
 
 ```text
 for cell in cells:
     for target in targets:
         warmup(target, cell)
-    for repeat in repeats:
-        for target in targets:
-            measure(target, cell, repeat)
+    for target in targets:
+        measure(target, cell)
     cooldown_s
 ```
 
-这样同一 cell 下各 target 的测量时间最接近，减少机器温度、网络波动等时间漂移对比较的影响。cooldown 只发生在整个 cell 的所有 target/repeat 完成之后，不在 target 或 repeat 之间额外插入。
+这样同一 cell 下各 target 的测量时间最接近，减少机器温度、网络波动等时间漂移对比较的影响。cooldown 只发生在整个 cell 的所有 target 完成之后。
 
 ### 6.2 并发模式
 
@@ -187,7 +184,6 @@ for cell in cells:
 - 使用全局 `seed` 和稳定 cell key 生成确定性 prompt 集。
 - 同一 cell 内，使用相同有效 tokenizer 的 target 共享完全一致的 prompt 集；不同 tokenizer 组分别生成 prompt，以对齐各自的目标 token 长度。
 - 每个请求内容不同，降低 prefix cache 命中导致的偏差。
-- 不同 repeat 使用不同 prompt 集，避免跨轮 cache 复用。
 - warmup 使用单独的 prompt 集。
 
 有本地/内置 tokenizer 时，按随机 token ID 序列 decode/re-encode 到目标内容 token 数；无 tokenizer 时使用可复现的随机词序列，按字符启发式接近目标长度。target 级 tokenizer 覆盖时，每个 target 使用自己的 tokenizer 生成 prompt。两类情况都在结果中记录目标长度、实际 usage 长度以及 token 数来源。`random-range-ratio`、prefix repetition 和 ShareGPT 等数据集留作后续扩展。
@@ -197,7 +193,7 @@ for cell in cells:
 ### 6.4 Warmup 与能力探测
 
 - 每个 target 在第一个正式 cell 之前执行一次能力 probe，仅当 `stream_options: auto` 时需要。probe 使用最小输出长度和并发 1，不计入正式结果。
-- 对每个 target × cell，在第一个 repeat 之前执行 `warmup_requests` 个相同并发、相同输入/输出长度的请求；warmup 不跨 repeat 重复。warmup 使用独立 prompt 集，不计入任何指标或吞吐时间窗口。
+- 对每个 target × cell，在正式测量之前执行 `warmup_requests` 个相同并发、相同输入/输出长度的请求；warmup 使用独立 prompt 集，不计入任何指标或吞吐时间窗口。
 - probe 和 workload warmup 都不属于正式测量；这样既能为每个长度/并发准备服务状态，也不改变正式样本数。
 - 若 `warmup_requests: 0`，仍保留 `stream_options: auto` 的 probe，因为它是能力探测而非负载预热。
 - warmup/probe 失败时，auto 模式可在明确识别为 `stream_options` 不受支持时降级；其他错误将该 target 标记为不可用并跳过其剩余 cell，其他 target 和 cell 继续执行。
@@ -281,13 +277,9 @@ TTFT 包含服务端排队、prefill、首 token 调度和网络传输，这正�
 
 分位数采用线性插值；样本数少于 2 时只输出可定义的值，不伪造统计量。
 
-### 8.3 多轮聚合
+### 8.3 文件粒度
 
-同一 cell 有多个 repeat 时：
-
-- `summary.csv` 保留每个 repeat 一行，便于审查离散程度。
-- `summary.json` 额外给出跨 repeat 的均值和标准差。
-- 不同 target 的比较以同 cell 同 repeat 的原始行和跨 repeat 汇总为准。
+每个 target/cell 产生一行正式聚合结果。需要独立重复实验时，重新运行同一配置。
 
 ## 9. 结果与报告
 
@@ -316,7 +308,7 @@ results/<run_id>/
 
 每个正式请求一行，包含：
 
-- target、cell_id、repeat、request_index
+- target、cell_id、request_index
 - 目标 input/output 长度与实际 token 数
 - `client_queue_s`、`ttft_ms`、`e2el_ms`、`tpot_ms`、ITL 摘要
 - `output_tokens`、`input_tokens`、token count source
@@ -326,15 +318,15 @@ results/<run_id>/
 
 ### `summary.csv`
 
-每个 cell/repeat/target 一行，扁平包含第 8 节的核心指标，便于 pandas、Excel 和 CI 消耗。
+每个 cell/target 一行，扁平包含第 8 节的核心指标，便于 pandas、Excel 和 CI 消耗。
 
 ### `summary.json`
 
-包含每个 cell/repeat/target 的行级聚合，以及同一 target/cell 跨 repeat 的均值和标准差。`run.json` 保存运行元数据和 target 能力，`summary.json` 专门承载稳定、易比较的指标结构。
+包含每个 cell/target 的行级聚合。`run.json` 保存运行元数据和 target 能力，`summary.json` 专门承载稳定、易比较的指标结构。
 
 ### `summary.md`
 
-人类可读的汇总表格，每行对应一个 target/cell/repeat，包含以下核心指标：
+人类可读的汇总表格，每行对应一个 target/cell，包含以下核心指标：
 
 - completed / failed
 - request throughput
@@ -366,7 +358,7 @@ src/llmbench/
   cli.py             # argparse、子命令、退出码
   config.py          # stdlib dataclass 配置模型、YAML 加载、校验、环境变量展开
   models.py          # Target、Cell、RequestResult、CellSummary 等数据模型
-  workload.py        # 矩阵展开、repeat/cooldown、cell 执行顺序
+  workload.py        # 矩阵展开、cooldown、cell 执行顺序
   promptgen.py       # 确定性 prompt 生成与长度控制
   tokenization.py    # 可选 tokenizer 加载、内置别名和计数降级
   tokenizers/        # 内置常用模型 tokenizer.json + manifest

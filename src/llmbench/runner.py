@@ -131,7 +131,7 @@ class BenchmarkRunner:
         clients: dict[str, Any] = {}
         headers: dict[str, dict[str, str]] = {}
         include_usage: dict[str, bool] = {}
-        max_concurrency = max(self.config.workload.concurrencies)
+        max_concurrency = max(self.config.workload.concurrency)
 
         try:
             for target in self.config.targets:
@@ -181,43 +181,42 @@ class BenchmarkRunner:
                         )
                         self.progress.warning(f"target {target.name} disabled: {exc}")
 
-                for repeat in range(self.config.run.repeats):
-                    prompt_cache: dict[str | None, list[GeneratedPrompt]] = {}
-                    for target in self.config.targets:
-                        capability = self.capabilities[target.name]
-                        if not capability.available:
-                            continue
-                        active_tokenizer = target_tokenizers[target.name]
-                        cache_key = _tokenizer_cache_key(
-                            self.config, target, self._tokenizer
-                        )
-                        if cache_key not in prompt_cache:
-                            prompt_cache[cache_key] = [
-                                generate_prompt(
-                                    self.config.run.seed,
-                                    cell,
-                                    repeat,
-                                    index,
-                                    self.config.workload,
-                                    active_tokenizer,
-                                )
-                                for index in range(self.config.workload.requests_per_cell)
-                            ]
-                        self.progress.cell_started(target.name, cell, repeat)
-                        results = await self._execute_requests(
-                            target=target,
-                            client=clients[target.name],
-                            headers=headers[target.name],
-                            cell=cell,
-                            prompts=prompt_cache[cache_key],
-                            include_usage=include_usage[target.name],
-                            tokenizer=active_tokenizer,
-                            repeat=repeat,
-                            record=True,
-                        )
-                        summary = summarize_results(results, cell, target.name, repeat)
-                        self.summaries.append(summary)
-                        self.progress.cell_finished(summary)
+                prompt_cache: dict[str | None, list[GeneratedPrompt]] = {}
+                for target in self.config.targets:
+                    capability = self.capabilities[target.name]
+                    if not capability.available:
+                        continue
+                    active_tokenizer = target_tokenizers[target.name]
+                    cache_key = _tokenizer_cache_key(
+                        self.config, target, self._tokenizer
+                    )
+                    if cache_key not in prompt_cache:
+                        prompt_cache[cache_key] = [
+                            generate_prompt(
+                                self.config.run.seed,
+                                cell,
+                                0,
+                                index,
+                                self.config.workload,
+                                active_tokenizer,
+                            )
+                            for index in range(self.config.workload.requests_per_cell)
+                        ]
+                    self.progress.cell_started(target.name, cell, 0)
+                    results = await self._execute_requests(
+                        target=target,
+                        client=clients[target.name],
+                        headers=headers[target.name],
+                        cell=cell,
+                        prompts=prompt_cache[cache_key],
+                        include_usage=include_usage[target.name],
+                        tokenizer=active_tokenizer,
+                        repeat=0,
+                        record=True,
+                    )
+                    summary = summarize_results(results, cell, target.name, 0)
+                    self.summaries.append(summary)
+                    self.progress.cell_finished(summary)
 
                 if cell_index < len(cells) - 1 and self.config.run.cooldown_s > 0:
                     await asyncio.sleep(self.config.run.cooldown_s)
@@ -369,12 +368,12 @@ class BenchmarkRunner:
 
     def partial_result(self) -> RunResult:
         cells = {cell.id: cell for cell in build_cells(self.config.workload)}
-        grouped: dict[tuple[str, str, int], list[RequestResult]] = defaultdict(list)
+        grouped: dict[tuple[str, str], list[RequestResult]] = defaultdict(list)
         for result in self.results:
-            grouped[(result.target, result.cell_id, result.repeat)].append(result)
+            grouped[(result.target, result.cell_id)].append(result)
         summaries = [
-            summarize_results(results, cells[cell_id], target, repeat)
-            for (target, cell_id, repeat), results in sorted(
+            summarize_results(results, cells[cell_id], target, 0)
+            for (target, cell_id), results in sorted(
                 grouped.items(), key=lambda item: item[0]
             )
             if cell_id in cells

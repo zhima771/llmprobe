@@ -2,14 +2,13 @@ run:
   name: vllm-vs-deepseek
   seed: 42
   output_dir: results
-  repeats: 2
   cooldown_s: 5
 
 workload:
   dataset: random
   requests_per_cell: 40
   warmup_requests: 2
-  concurrencies: [1, 4, 8]
+  concurrency: [1, 4, 8]
   input_lengths: [512]
   output_lengths: [128]
   stream_options: auto

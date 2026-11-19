@@ -14,7 +14,6 @@ from llmbench.metrics import summarize_results
 from llmbench.models import Cell, CellSummary, RequestResult, RunResult, TargetCapability
 from llmbench.report import (
     config_to_dict,
-    cross_repeat_aggregates,
     print_summary,
     request_to_dict,
     summary_to_dict,
@@ -38,7 +37,7 @@ def make_config(tmp_path: Path) -> AppConfig:
         workload=WorkloadConfig(
             requests_per_cell=1,
             warmup_requests=0,
-            concurrencies=(1,),
+            concurrency=(1,),
             input_lengths=(8,),
             output_lengths=(2,),
         ),
@@ -56,7 +55,7 @@ def make_config(tmp_path: Path) -> AppConfig:
 def make_result() -> RequestResult:
     return RequestResult(
         target="mock",
-        cell_id="i8-o2-c1",
+        cell_id="in8-out2-conc1",
         repeat=0,
         request_index=0,
         concurrency=1,
@@ -86,7 +85,7 @@ def make_result() -> RequestResult:
 
 
 def make_summary(item: RequestResult, repeat: int = 0) -> CellSummary:
-    cell = Cell(id="i8-o2-c1", concurrency=1, input_length=8, output_length=2)
+    cell = Cell(id="in8-out2-conc1", concurrency=1, input_length=8, output_length=2)
     repeated = replace(item, repeat=repeat)
     return summarize_results([repeated], cell, "mock", repeat)
 
@@ -360,8 +359,7 @@ def test_write_report_creates_all_files_and_redacts_secret(tmp_path: Path) -> No
         rows = list(csv.DictReader(handle))
     expected_csv = {
         "target": "mock",
-        "cell_id": "i8-o2-c1",
-        "repeat": "0",
+        "cell_id": "in8-out2-conc1",
         "concurrency": "1",
         "input_length": "8",
         "output_length": "2",
@@ -428,7 +426,7 @@ def test_write_report_honors_save_flags_and_writes_errors(tmp_path: Path) -> Non
     assert request_row["generated_text"] == "failed output"
     assert (
         (output / "errors.log").read_text(encoding="utf-8")
-        == "mock i8-o2-c1 repeat=0 request=0: http: upstream failed\n"
+        == "mock in8-out2-conc1 request=0: http: upstream failed\n"
     )
 
 
@@ -444,7 +442,7 @@ def test_errors_log_escapes_embedded_line_breaks(tmp_path: Path) -> None:
     output = write_report(run, make_config(tmp_path))
     log = (output / "errors.log").read_text(encoding="utf-8")
 
-    assert log == "mock i8-o2-c1 repeat=0 request=0: stream: first\\r\\nsecond\\nthird\\rfourth\n"
+    assert log == "mock in8-out2-conc1 request=0: stream: first\\r\\nsecond\\nthird\\rfourth\n"
     assert log.count("\n") == 1
 
 
@@ -461,13 +459,10 @@ def test_summary_markdown_escapes_table_delimiters_and_line_breaks(tmp_path: Pat
     assert "\r" not in markdown
 
 
-def test_summary_outputs_include_repeat_rows_and_cross_repeat_mean_std(
-    tmp_path: Path,
-) -> None:
+def test_summary_json_omits_repeat_and_cross_repeat_fields(tmp_path: Path) -> None:
     config = make_config(tmp_path)
-    first_request = replace(
+    request = replace(
         make_result(),
-        repeat=0,
         started_at=0.0,
         stream_end_s=1.0,
         ttft_s=0.01,
@@ -475,66 +470,32 @@ def test_summary_outputs_include_repeat_rows_and_cross_repeat_mean_std(
         tpot_s=0.01,
         itl_s=[0.01],
     )
-    second_request = replace(
-        make_result(),
-        repeat=1,
-        started_at=0.0,
-        stream_end_s=1.0,
-        ttft_s=0.02,
-        e2el_s=0.04,
-        tpot_s=0.03,
-        itl_s=[0.03],
-    )
-    first_summary = make_summary(first_request, repeat=0)
-    second_summary = make_summary(second_request, repeat=1)
-    run = make_run([first_summary, second_summary], [first_request, second_request])
+    summary = make_summary(request, repeat=0)
+    run = make_run([summary], [request])
 
     output = write_report(run, config)
     payload = json.loads((output / "summary.json").read_text(encoding="utf-8"))
 
-    assert [item["repeat"] for item in payload["summaries"]] == [0, 1]
-    assert payload["summaries"][0]["ttft"]["p50_ms"] == 10.0
-    assert payload["summaries"][1]["ttft"]["p50_ms"] == 20.0
-    assert payload["cross_repeat"] == [
-        {
-            "target": "mock",
-            "cell_id": "i8-o2-c1",
-            "repeats": 2,
-            "metrics": {
-                "request_throughput": {"mean": 1.0, "std": 0.0},
-                "output_token_throughput": {"mean": 2.0, "std": 0.0},
-                "total_token_throughput": {"mean": 10.0, "std": 0.0},
-                "decode_tokens_per_s": {"mean": 66.66666666666667, "std": 33.33333333333333},
-                "ttft_p50_ms": {"mean": 15.0, "std": 5.0},
-                "ttft_p95_ms": {"mean": 15.0, "std": 5.0},
-                "ttft_p99_ms": {"mean": 15.0, "std": 5.0},
-                "tpot_p50_ms": {"mean": 20.0, "std": 10.0},
-                "tpot_p95_ms": {"mean": 20.0, "std": 10.0},
-                "itl_p95_ms": {"mean": 20.0, "std": 10.0},
-                "e2el_p50_ms": {"mean": 30.0, "std": 10.0},
-                "e2el_p95_ms": {"mean": 30.0, "std": 10.0},
-            },
-        }
-    ]
+    assert "cross_repeat" not in payload
+    assert len(payload["summaries"]) == 1
+    assert "repeat" not in payload["summaries"][0]
+    assert payload["summaries"][0]["cell_id"] == "in8-out2-conc1"
     with (output / "summary.csv").open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
-    assert len(rows) == 2
+    assert len(rows) == 1
+    assert "repeat" not in rows[0]
     assert all(isinstance(value, str) for row in rows for value in row.values())
 
 
-def test_cross_repeat_aggregates_and_summary_to_dict_are_public() -> None:
-    first = make_summary(replace(make_result(), ttft_s=0.01), repeat=0)
-    second = make_summary(replace(make_result(), ttft_s=0.03), repeat=1)
+def test_summary_to_dict_omits_repeat_and_exposes_metrics() -> None:
+    summary = make_summary(replace(make_result(), tpot_s=0.01), repeat=0)
 
-    aggregates = cross_repeat_aggregates([second, first])
+    data = summary_to_dict(summary)
 
-    assert len(aggregates) == 1
-    assert aggregates[0]["repeats"] == 2
-    assert aggregates[0]["metrics"]["ttft_p50_ms"] == {"mean": 20.0, "std": 10.0}
-    assert summary_to_dict(first)["repeat"] == 0
-    assert summary_to_dict(first)["target"] == "mock"
-    assert summary_to_dict(first)["decode_tokens_per_s"] == 100.0
-    assert summary_to_dict(first)["decode_tokens_per_s_per_stream"] == 100.0
+    assert "repeat" not in data
+    assert data["target"] == "mock"
+    assert data["decode_tokens_per_s"] == 100.0
+    assert data["decode_tokens_per_s_per_stream"] == 100.0
 
 
 def test_write_report_does_not_overwrite_an_existing_run(tmp_path: Path) -> None:
@@ -561,12 +522,13 @@ def test_print_summary_renders_the_run_table() -> None:
     rendered = stream.getvalue()
     assert "llmbench results: 20260101T000000Z-report-test" in rendered
     assert "mock" in rendered
-    assert "i8-o2-c1" in rendered
+    assert "in8-out2-conc1" in rendered
     assert "Decode tok/s" in rendered
     assert "TTFT avg/p95" in rendered
     assert "TPOT avg/p95" in rendered
     assert "ITL avg/p95" in rendered
     assert "E2EL avg/p95" in rendered
+    assert "Repeat" not in rendered
     assert "10.00 / 10.00 ms" in rendered
     assert "20.00 / 20.00 ms" in rendered
     assert "100.00" in rendered
@@ -629,3 +591,22 @@ def test_report_files_persist_sanitized_base_url_only(tmp_path: Path) -> None:
         assert "alice" not in base_url
         assert "url-secret" not in base_url
         assert "query-secret" not in base_url
+
+
+def test_direct_api_key_is_redacted_from_effective_config() -> None:
+    config = AppConfig(
+        run=RunConfig(),
+        workload=WorkloadConfig(requests_per_cell=1),
+        targets=(
+            TargetConfig(
+                name="mock",
+                base_url="http://mock/v1",
+                model="m",
+                api_key="sk-direct-secret",
+            ),
+        ),
+    )
+
+    serialized = json.dumps(config_to_dict(config))
+    assert "sk-direct-secret" not in serialized
+    assert config_to_dict(config)["targets"][0]["api_key"] == "<redacted>"

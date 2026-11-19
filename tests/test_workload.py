@@ -7,25 +7,25 @@ from llmbench.workload import build_cells, cell_seed
 
 def test_build_cells_preserves_config_order() -> None:
     workload = WorkloadConfig(
-        concurrencies=(8, 1),
+        concurrency=(8, 1),
         input_lengths=(128, 16),
         output_lengths=(32, 64),
     )
     cells = build_cells(workload)
     assert [cell.id for cell in cells] == [
-        "i128-o32-c8",
-        "i128-o32-c1",
-        "i128-o64-c8",
-        "i128-o64-c1",
-        "i16-o32-c8",
-        "i16-o32-c1",
-        "i16-o64-c8",
-        "i16-o64-c1",
+        "in128-out32-conc8",
+        "in128-out32-conc1",
+        "in128-out64-conc8",
+        "in128-out64-conc1",
+        "in16-out32-conc8",
+        "in16-out32-conc1",
+        "in16-out64-conc8",
+        "in16-out64-conc1",
     ]
 
 
 def test_cell_seed_is_stable_and_repeat_sensitive() -> None:
-    workload = WorkloadConfig(concurrencies=(1,), input_lengths=(10,), output_lengths=(5,))
+    workload = WorkloadConfig(concurrency=(1,), input_lengths=(10,), output_lengths=(5,))
     cell = build_cells(workload)[0]
     assert cell_seed(42, cell, 0) == cell_seed(42, cell, 0)
     assert cell_seed(42, cell, 0) != cell_seed(42, cell, 1)

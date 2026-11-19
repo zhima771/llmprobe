@@ -4,7 +4,6 @@ import csv
 import json
 import re
 import statistics
-from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from itertools import pairwise
 from pathlib import Path
@@ -81,7 +80,6 @@ _TOKEN_NAMES = {"token", "tokens"}
 _CSV_FIELDS = [
     "target",
     "cell_id",
-    "repeat",
     "concurrency",
     "input_length",
     "output_length",
@@ -108,22 +106,6 @@ _CSV_FIELDS = [
     "peak_concurrency",
     "token_sources",
 ]
-_METRIC_NAMES = [
-    "request_throughput",
-    "output_token_throughput",
-    "total_token_throughput",
-    "ttft_p50_ms",
-    "ttft_p95_ms",
-    "ttft_p99_ms",
-    "tpot_p50_ms",
-    "tpot_p95_ms",
-    "itl_p95_ms",
-    "e2el_p50_ms",
-    "e2el_p95_ms",
-    "decode_tokens_per_s",
-]
-
-
 def _jsonable(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
@@ -224,7 +206,6 @@ def request_to_dict(
     data: dict[str, Any] = {
         "target": result.target,
         "cell_id": result.cell_id,
-        "repeat": result.repeat,
         "request_index": result.request_index,
         "concurrency": result.concurrency,
         "input_length_target": result.input_length_target,
@@ -260,66 +241,15 @@ def request_to_dict(
 
 def summary_to_dict(summary: CellSummary) -> dict[str, Any]:
     data = _jsonable(summary)
+    data.pop("repeat", None)
     data["decode_tokens_per_s_per_stream"] = summary.decode_tokens_per_s
     return data
-
-
-def _metric_value(summary: CellSummary, name: str) -> float | None:
-    mapping: dict[str, Callable[[CellSummary], float | None]] = {
-        "request_throughput": lambda item: item.request_throughput,
-        "output_token_throughput": lambda item: item.output_token_throughput,
-        "total_token_throughput": lambda item: item.total_token_throughput,
-        "ttft_p50_ms": lambda item: item.ttft.p50_ms,
-        "ttft_p95_ms": lambda item: item.ttft.p95_ms,
-        "ttft_p99_ms": lambda item: item.ttft.p99_ms,
-        "tpot_p50_ms": lambda item: item.tpot.p50_ms,
-        "tpot_p95_ms": lambda item: item.tpot.p95_ms,
-        "itl_p95_ms": lambda item: item.itl.p95_ms,
-        "e2el_p50_ms": lambda item: item.e2el.p50_ms,
-        "e2el_p95_ms": lambda item: item.e2el.p95_ms,
-        "decode_tokens_per_s": lambda item: item.decode_tokens_per_s,
-    }
-    return mapping[name](summary)
-
-
-def cross_repeat_aggregates(summaries: list[CellSummary]) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, str], list[CellSummary]] = {}
-    for summary in summaries:
-        grouped.setdefault((summary.target, summary.cell_id), []).append(summary)
-
-    output: list[dict[str, Any]] = []
-    for (target, cell_id), items in sorted(grouped.items()):
-        metrics: dict[str, dict[str, float | None]] = {}
-        for metric_name in _METRIC_NAMES:
-            values = [
-                value
-                for item in items
-                if (value := _metric_value(item, metric_name)) is not None
-            ]
-            metrics[metric_name] = {
-                "mean": statistics.fmean(values) if values else None,
-                "std": (
-                    statistics.pstdev(values)
-                    if len(values) > 1
-                    else 0.0 if values else None
-                ),
-            }
-        output.append(
-            {
-                "target": target,
-                "cell_id": cell_id,
-                "repeats": len(items),
-                "metrics": metrics,
-            }
-        )
-    return output
 
 
 def _flatten_summary(summary: CellSummary) -> dict[str, Any]:
     return {
         "target": summary.target,
         "cell_id": summary.cell_id,
-        "repeat": summary.repeat,
         "concurrency": summary.concurrency,
         "input_length": summary.input_length,
         "output_length": summary.output_length,
@@ -373,15 +303,15 @@ def _markdown(result: RunResult) -> str:
         f"- Interrupted: {result.interrupted}",
         "",
         (
-            "| Target | Cell | Repeat | OK/Err | Req/s | Out tok/s | Decode tok/s | "
+            "| Target | Cell | OK/Err | Req/s | Out tok/s | Decode tok/s | "
             "TTFT avg/p95 | TPOT avg/p95 | ITL avg/p95 | E2EL avg/p95 |"
         ),
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for summary in result.summaries:
         lines.append(
             f"| {_escape_table_cell(summary.target)} | "
-            f"{_escape_table_cell(summary.cell_id)} | {summary.repeat} | "
+            f"{_escape_table_cell(summary.cell_id)} | "
             f"{summary.completed}/{summary.failed} | "
             f"{_format_number(summary.request_throughput)} | "
             f"{_format_number(summary.output_token_throughput)} | "
@@ -438,7 +368,6 @@ def write_report(result: RunResult, config: AppConfig) -> Path:
     summary_data = {
         "schema_version": result.schema_version,
         "summaries": [summary_to_dict(item) for item in result.summaries],
-        "cross_repeat": cross_repeat_aggregates(result.summaries),
     }
     (run_dir / "summary.json").write_text(
         json.dumps(summary_data, ensure_ascii=False, indent=2),
@@ -454,7 +383,7 @@ def write_report(result: RunResult, config: AppConfig) -> Path:
 
     errors = [
         _escape_line_breaks(
-            f"{item.target} {item.cell_id} repeat={item.repeat} "
+            f"{item.target} {item.cell_id} "
             f"request={item.request_index}: {item.error_kind or 'error'}: {item.error}"
         )
         for item in result.requests
@@ -473,7 +402,6 @@ def print_summary(result: RunResult, console: Console | None = None) -> None:
     for column in (
         "Target",
         "Cell",
-        "Repeat",
         "OK/Err",
         "Req/s",
         "Out tok/s",
@@ -491,7 +419,6 @@ def print_summary(result: RunResult, console: Console | None = None) -> None:
         table.add_row(
             summary.target,
             summary.cell_id,
-            str(summary.repeat),
             f"{summary.completed}/{summary.failed}",
             _format_number(summary.request_throughput),
             _format_number(summary.output_token_throughput),
