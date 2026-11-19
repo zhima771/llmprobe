@@ -102,7 +102,7 @@ _CSV_FIELDS = [
     "itl_p95_ms",
     "e2el_p50_ms",
     "e2el_p95_ms",
-    "decode_tokens_per_s_per_stream",
+    "decode_tokens_per_s",
     "input_tokens_mean",
     "output_tokens_mean",
     "peak_concurrency",
@@ -120,6 +120,7 @@ _METRIC_NAMES = [
     "itl_p95_ms",
     "e2el_p50_ms",
     "e2el_p95_ms",
+    "decode_tokens_per_s",
 ]
 
 
@@ -258,7 +259,9 @@ def request_to_dict(
 
 
 def summary_to_dict(summary: CellSummary) -> dict[str, Any]:
-    return _jsonable(summary)
+    data = _jsonable(summary)
+    data["decode_tokens_per_s_per_stream"] = summary.decode_tokens_per_s
+    return data
 
 
 def _metric_value(summary: CellSummary, name: str) -> float | None:
@@ -274,6 +277,7 @@ def _metric_value(summary: CellSummary, name: str) -> float | None:
         "itl_p95_ms": lambda item: item.itl.p95_ms,
         "e2el_p50_ms": lambda item: item.e2el.p50_ms,
         "e2el_p95_ms": lambda item: item.e2el.p95_ms,
+        "decode_tokens_per_s": lambda item: item.decode_tokens_per_s,
     }
     return mapping[name](summary)
 
@@ -336,7 +340,7 @@ def _flatten_summary(summary: CellSummary) -> dict[str, Any]:
         "itl_p95_ms": summary.itl.p95_ms,
         "e2el_p50_ms": summary.e2el.p50_ms,
         "e2el_p95_ms": summary.e2el.p95_ms,
-        "decode_tokens_per_s_per_stream": summary.decode_tokens_per_s_per_stream,
+        "decode_tokens_per_s": summary.decode_tokens_per_s,
         "input_tokens_mean": summary.input_tokens_mean,
         "output_tokens_mean": summary.output_tokens_mean,
         "peak_concurrency": summary.peak_concurrency,
@@ -365,15 +369,15 @@ def _markdown(result: RunResult) -> str:
         f"- Interrupted: {result.interrupted}",
         "",
         (
-            "| Target | Cell | Repeat | OK/Err | Req/s | Out tok/s | TTFT p50 | "
-            "TTFT p95 | TPOT p50 | ITL p95 | E2EL p95 |"
+            "| Target | Cell | Repeat | OK/Err | Req/s | Out tok/s | Decode tok/s | "
+            "TTFT p50 | TTFT p95 | TPOT p50 | ITL p95 | E2EL p95 |"
         ),
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for summary in result.summaries:
         lines.append(
             "| {target} | {cell} | {repeat} | {ok}/{failed} | {rps} | {out_tps} | "
-            "{ttft50} | {ttft95} | {tpot50} | {itl95} | {e2el95} |".format(
+            "{decode_tps} | {ttft50} | {ttft95} | {tpot50} | {itl95} | {e2el95} |".format(
                 target=_escape_table_cell(summary.target),
                 cell=_escape_table_cell(summary.cell_id),
                 repeat=summary.repeat,
@@ -381,6 +385,7 @@ def _markdown(result: RunResult) -> str:
                 failed=summary.failed,
                 rps=_format_number(summary.request_throughput),
                 out_tps=_format_number(summary.output_token_throughput),
+                decode_tps=_format_number(summary.decode_tokens_per_s),
                 ttft50=_format_number(summary.ttft.p50_ms) + " ms",
                 ttft95=_format_number(summary.ttft.p95_ms) + " ms",
                 tpot50=_format_number(summary.tpot.p50_ms) + " ms",
@@ -474,6 +479,7 @@ def print_summary(result: RunResult, console: Console | None = None) -> None:
         "OK/Err",
         "Req/s",
         "Out tok/s",
+        "Decode tok/s",
         "TTFT p50",
         "TTFT p95",
         "TPOT p50",
@@ -491,6 +497,7 @@ def print_summary(result: RunResult, console: Console | None = None) -> None:
             f"{summary.completed}/{summary.failed}",
             _format_number(summary.request_throughput),
             _format_number(summary.output_token_throughput),
+            _format_number(summary.decode_tokens_per_s),
             _format_number(summary.ttft.p50_ms) + " ms",
             _format_number(summary.ttft.p95_ms) + " ms",
             _format_number(summary.tpot.p50_ms) + " ms",

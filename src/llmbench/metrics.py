@@ -124,7 +124,7 @@ def summarize_results(
         tpot=tpot_stats,
         itl=latency_stats(itls),
         e2el=latency_stats(e2els),
-        decode_tokens_per_s_per_stream=decode_tps,
+        decode_tokens_per_s=decode_tps,
         input_tokens_mean=statistics.fmean(input_values) if input_values else None,
         output_tokens_mean=statistics.fmean(output_values) if output_values else None,
         peak_concurrency=_peak_concurrency(results),

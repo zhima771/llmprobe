@@ -90,11 +90,16 @@ class CellSummary:
     tpot: LatencyStats
     itl: LatencyStats
     e2el: LatencyStats
-    decode_tokens_per_s_per_stream: float | None
+    decode_tokens_per_s: float | None
     input_tokens_mean: float | None
     output_tokens_mean: float | None
     peak_concurrency: int
     token_sources: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def decode_tokens_per_s_per_stream(self) -> float | None:
+        """Backward-compatible alias for decode_tokens_per_s."""
+        return self.decode_tokens_per_s
 
 
 @dataclass(frozen=True)

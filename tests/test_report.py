@@ -382,7 +382,7 @@ def test_write_report_creates_all_files_and_redacts_secret(tmp_path: Path) -> No
         "itl_p95_ms": "10.0",
         "e2el_p50_ms": "20.0",
         "e2el_p95_ms": "20.0",
-        "decode_tokens_per_s_per_stream": "100.0",
+        "decode_tokens_per_s": "100.0",
         "input_tokens_mean": "8.0",
         "output_tokens_mean": "2.0",
         "peak_concurrency": "1",
@@ -503,6 +503,7 @@ def test_summary_outputs_include_repeat_rows_and_cross_repeat_mean_std(
                 "request_throughput": {"mean": 1.0, "std": 0.0},
                 "output_token_throughput": {"mean": 2.0, "std": 0.0},
                 "total_token_throughput": {"mean": 10.0, "std": 0.0},
+                "decode_tokens_per_s": {"mean": 66.66666666666667, "std": 33.33333333333333},
                 "ttft_p50_ms": {"mean": 15.0, "std": 5.0},
                 "ttft_p95_ms": {"mean": 15.0, "std": 5.0},
                 "ttft_p99_ms": {"mean": 15.0, "std": 5.0},
@@ -531,6 +532,8 @@ def test_cross_repeat_aggregates_and_summary_to_dict_are_public() -> None:
     assert aggregates[0]["metrics"]["ttft_p50_ms"] == {"mean": 20.0, "std": 10.0}
     assert summary_to_dict(first)["repeat"] == 0
     assert summary_to_dict(first)["target"] == "mock"
+    assert summary_to_dict(first)["decode_tokens_per_s"] == 100.0
+    assert summary_to_dict(first)["decode_tokens_per_s_per_stream"] == 100.0
 
 
 def test_write_report_does_not_overwrite_an_existing_run(tmp_path: Path) -> None:
@@ -558,6 +561,8 @@ def test_print_summary_renders_the_run_table() -> None:
     assert "llmbench results: 20260101T000000Z-report-test" in rendered
     assert "mock" in rendered
     assert "i8-o2-c1" in rendered
+    assert "Decode tok/s" in rendered
+    assert "100.00" in rendered
 
 
 def test_config_serialization_sanitizes_base_url_credentials_and_query(

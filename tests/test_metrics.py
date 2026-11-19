@@ -79,6 +79,8 @@ def test_summarize_results_calculates_throughput() -> None:
     assert summary.total_token_throughput == pytest.approx(40.0)
     assert summary.peak_concurrency == 2
     assert summary.ttft.p50_ms == pytest.approx(100.0)
+    assert summary.decode_tokens_per_s == pytest.approx(10.0)
+    assert summary.decode_tokens_per_s_per_stream == pytest.approx(10.0)
 
 
 def test_duration_uses_stream_end_instead_of_last_token() -> None:

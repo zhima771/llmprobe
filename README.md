@@ -73,7 +73,7 @@ uv run llmbench run config.yaml
 - **Request throughput**：成功请求数 / benchmark duration。
 - **Output token throughput**：成功请求输出 token 总数 / benchmark duration。
 - **Total token throughput**：输入和输出 token 总数 / benchmark duration；输入 token 不可知时为 null。
-- **Decode tok/s per stream**：`1000 / mean TPOT ms`。
+- **Decode tok/s**：`1000 / mean TPOT ms`，即单流 decode 吞吐；同时写入 CSV/JSON/Markdown。
 
 ## 配置要点
 
