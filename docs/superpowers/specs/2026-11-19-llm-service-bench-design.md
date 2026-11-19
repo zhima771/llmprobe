@@ -277,6 +277,8 @@ TTFT 包含服务端排队、prefill、首 token 调度和网络传输，这正�
 - 完成/失败请求数、错误率
 - benchmark duration：从该 cell 第一条正式请求发出，到所有正式请求的 HTTP 流关闭/失败，即最晚的 `stream_end_s`；不使用最后一个 token 事件时间
 - request throughput = 成功请求数 / duration
+- total input tokens / total output tokens：仅统计成功请求；输入 token 不可知时输入总数为 null
+- input token throughput = 输入 token 总数 / duration；输入 token 不可知时为 null
 - output token throughput = 成功请求的 output tokens 总和 / duration；event 计数来源时结果可用但标记为近似
 - total token throughput = (input tokens + output tokens) / duration；只有所有成功请求的 input/output token 均可确定时才输出，否则为 null
 - TTFT：mean、std、p50、p90、p95、p99

@@ -294,6 +294,16 @@ metrics 抓取使用独立的短超时（最多 10 秒），失败只会产生�
 | `ITL avg/p95` | token 间延迟平均值/p95 |
 | `E2EL avg/p95` | 端到端延迟平均值/p95 |
 
+主表之后还会输出 `token accounting` 表：
+
+| 列 | 说明 |
+|---|---|
+| `In tokens` | 成功请求的输入 token 总数；输入 token 不可知时显示 `-` |
+| `Out tokens` | 成功请求的输出 token 总数 |
+| `In tok/s` | 输入 token 吞吐，`In tokens / benchmark duration` |
+| `Out tok/s` | 输出 token 吞吐，`Out tokens / benchmark duration` |
+| `Total tok/s` | 输入和输出 token 总吞吐 |
+
 ## 指标
 
 - **TTFT**：请求发送到第一个 token-bearing delta 的时间。
@@ -301,6 +311,7 @@ metrics 抓取使用独立的短超时（最多 10 秒），失败只会产生�
 - **ITL**：相邻 token-bearing chunk 的间隔，属于事件级指标。
 - **E2EL**：请求发送到最后一个 token-bearing delta。
 - **Request throughput**：成功请求数 / benchmark duration。
+- **Input token throughput**：成功请求输入 token 总数 / benchmark duration；输入 token 未知时为 null。
 - **Output token throughput**：成功请求输出 token 总数 / benchmark duration。
 - **Total token throughput**：输入和输出 token 总数 / benchmark duration；输入 token 不可知时为 null。
 - **Decode tok/s**：`1000 / mean TPOT ms`，即单流 decode 吞吐；同时写入 CSV/JSON/Markdown。

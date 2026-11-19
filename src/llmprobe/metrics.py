@@ -92,12 +92,16 @@ def summarize_results(
 
     if duration_s > 0:
         request_throughput = len(successful) / duration_s
+        input_throughput: float | None = (
+            input_total / duration_s if input_known else None
+        )
         output_throughput: float | None = output_total / duration_s
         total_throughput: float | None = (
             (input_total + output_total) / duration_s if input_known else None
         )
     else:
         request_throughput = 0.0
+        input_throughput = None
         output_throughput = None
         total_throughput = None
 
@@ -129,8 +133,11 @@ def summarize_results(
         error_rate=(failed / len(results)) if results else 0.0,
         duration_s=duration_s,
         request_throughput=request_throughput,
+        input_token_throughput=input_throughput,
         output_token_throughput=output_throughput,
         total_token_throughput=total_throughput,
+        input_tokens_total=input_total if input_known else None,
+        output_tokens_total=output_total,
         ttft=latency_stats(ttfts),
         tpot=tpot_stats,
         itl=latency_stats(itls),

@@ -75,6 +75,9 @@ def test_summarize_results_calculates_throughput() -> None:
     assert summary.failed == 0
     assert summary.duration_s == pytest.approx(1.0)
     assert summary.request_throughput == pytest.approx(2.0)
+    assert summary.input_tokens_total == 30
+    assert summary.output_tokens_total == 10
+    assert summary.input_token_throughput == pytest.approx(30.0)
     assert summary.output_token_throughput == pytest.approx(10.0)
     assert summary.total_token_throughput == pytest.approx(40.0)
     assert summary.peak_concurrency == 2
@@ -106,6 +109,9 @@ def test_throughput_counts_only_successful_requests() -> None:
     summary = summarize_results(results, cell, "mock", 0)
     assert summary.duration_s == pytest.approx(1.0)
     assert summary.request_throughput == pytest.approx(1.0)
+    assert summary.input_tokens_total == 10
+    assert summary.output_tokens_total == 5
+    assert summary.input_token_throughput == pytest.approx(10.0)
     assert summary.output_token_throughput == pytest.approx(5.0)
     assert summary.total_token_throughput == pytest.approx(15.0)
 
@@ -129,6 +135,9 @@ def test_total_throughput_is_none_when_input_tokens_are_unknown() -> None:
         0,
     )
     assert summary.total_token_throughput is None
+    assert summary.input_tokens_total is None
+    assert summary.output_tokens_total == 5
+    assert summary.input_token_throughput is None
     assert summary.output_token_throughput is not None
 
 
@@ -139,5 +148,8 @@ def test_all_failed_requests_do_not_produce_latency_stats() -> None:
     )
     assert summary.completed == 0
     assert summary.failed == 1
+    assert summary.input_tokens_total is None
+    assert summary.output_tokens_total == 0
+    assert summary.input_token_throughput is None
     assert summary.ttft.count == 0
     assert summary.ttft.mean_ms is None

@@ -88,8 +88,11 @@ _CSV_FIELDS = [
     "error_rate",
     "duration_s",
     "request_throughput",
+    "input_token_throughput",
     "output_token_throughput",
     "total_token_throughput",
+    "input_tokens_total",
+    "output_tokens_total",
     "ttft_mean_ms",
     "ttft_p50_ms",
     "ttft_p95_ms",
@@ -272,8 +275,11 @@ def _flatten_summary(summary: CellSummary) -> dict[str, Any]:
         "error_rate": summary.error_rate,
         "duration_s": summary.duration_s,
         "request_throughput": summary.request_throughput,
+        "input_token_throughput": summary.input_token_throughput,
         "output_token_throughput": summary.output_token_throughput,
         "total_token_throughput": summary.total_token_throughput,
+        "input_tokens_total": summary.input_tokens_total,
+        "output_tokens_total": summary.output_tokens_total,
         "ttft_mean_ms": summary.ttft.mean_ms,
         "ttft_p50_ms": summary.ttft.p50_ms,
         "ttft_p95_ms": summary.ttft.p95_ms,
@@ -326,6 +332,10 @@ def _format_count(value: float | None) -> str:
     return "-" if value is None else f"{value:.0f}"
 
 
+def _format_integer(value: int | None) -> str:
+    return "-" if value is None else str(value)
+
+
 def _format_per_position(values: tuple[float, ...]) -> str:
     return "-" if not values else " / ".join(f"{value * 100.0:.1f}%" for value in values)
 
@@ -364,6 +374,28 @@ def _markdown(result: RunResult) -> str:
             f"{_avg_p95(summary.tpot.mean_ms, summary.tpot.p95_ms)} | "
             f"{_avg_p95(summary.itl.mean_ms, summary.itl.p95_ms)} | "
             f"{_avg_p95(summary.e2el.mean_ms, summary.e2el.p95_ms)} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Token Accounting",
+            "",
+            (
+                "| Target | Cell | Input tokens | Output tokens | "
+                "Input tok/s | Output tok/s | Total tok/s |"
+            ),
+            "|---|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for summary in result.summaries:
+        lines.append(
+            f"| {_escape_table_cell(summary.target)} | "
+            f"{_escape_table_cell(summary.cell_id)} | "
+            f"{_format_integer(summary.input_tokens_total)} | "
+            f"{_format_integer(summary.output_tokens_total)} | "
+            f"{_format_number(summary.input_token_throughput)} | "
+            f"{_format_number(summary.output_token_throughput)} | "
+            f"{_format_number(summary.total_token_throughput)} |"
         )
     spec_decode = [summary for summary in result.summaries if summary.spec_decode]
     if spec_decode:
@@ -502,6 +534,32 @@ def print_summary(result: RunResult, console: Console | None = None) -> None:
             _avg_p95(summary.e2el.mean_ms, summary.e2el.p95_ms),
         )
     output.print(table)
+
+    token_table = Table(title="token accounting")
+    for column in (
+        "Target",
+        "Cell",
+        "In tokens",
+        "Out tokens",
+        "In tok/s",
+        "Out tok/s",
+        "Total tok/s",
+    ):
+        token_table.add_column(
+            column,
+            justify="right" if column not in {"Target", "Cell"} else "left",
+        )
+    for summary in result.summaries:
+        token_table.add_row(
+            summary.target,
+            summary.cell_id,
+            _format_integer(summary.input_tokens_total),
+            _format_integer(summary.output_tokens_total),
+            _format_number(summary.input_token_throughput),
+            _format_number(summary.output_token_throughput),
+            _format_number(summary.total_token_throughput),
+        )
+    output.print(token_table)
 
     spec_decode = [summary for summary in result.summaries if summary.spec_decode]
     if not spec_decode:

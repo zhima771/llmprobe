@@ -84,8 +84,11 @@ class CellSummary:
     error_rate: float
     duration_s: float
     request_throughput: float
+    input_token_throughput: float | None
     output_token_throughput: float | None
     total_token_throughput: float | None
+    input_tokens_total: int | None
+    output_tokens_total: int
     ttft: LatencyStats
     tpot: LatencyStats
     itl: LatencyStats

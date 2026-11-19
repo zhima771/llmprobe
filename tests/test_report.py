@@ -373,8 +373,11 @@ def test_write_report_creates_all_files_and_redacts_secret(tmp_path: Path) -> No
         "error_rate": "0.0",
         "duration_s": "2.0",
         "request_throughput": "0.5",
+        "input_token_throughput": "4.0",
         "output_token_throughput": "1.0",
         "total_token_throughput": "5.0",
+        "input_tokens_total": "8",
+        "output_tokens_total": "2",
         "ttft_mean_ms": "10.0",
         "ttft_p50_ms": "10.0",
         "ttft_p95_ms": "10.0",
@@ -461,6 +464,7 @@ def test_summary_markdown_escapes_table_delimiters_and_line_breaks(tmp_path: Pat
 
     assert "| a\\|b | cell\\r\\nid |" in markdown
     assert "| TTFT avg/p95 | TPOT avg/p95 | ITL avg/p95 | E2EL avg/p95 |" in markdown
+    assert "## Token Accounting" in markdown
     assert "\r" not in markdown
 
 
@@ -501,6 +505,9 @@ def test_summary_to_dict_omits_repeat_and_exposes_metrics() -> None:
     assert data["target"] == "mock"
     assert data["decode_tokens_per_s"] == 100.0
     assert data["decode_tokens_per_s_per_stream"] == 100.0
+    assert data["input_tokens_total"] == 8
+    assert data["output_tokens_total"] == 2
+    assert data["input_token_throughput"] is not None
 
 
 def test_write_report_does_not_overwrite_an_existing_run(tmp_path: Path) -> None:
@@ -533,6 +540,10 @@ def test_print_summary_renders_the_run_table() -> None:
     assert "TPOT avg/p95" in rendered
     assert "ITL avg/p95" in rendered
     assert "E2EL avg/p95" in rendered
+    assert "token accounting" in rendered
+    assert "In tokens" in rendered
+    assert "Out tokens" in rendered
+    assert "In tok/s" in rendered
     assert "Repeat" not in rendered
     assert "10.00 / 10.00 ms" in rendered
     assert "20.00 / 20.00 ms" in rendered
