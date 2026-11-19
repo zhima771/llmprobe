@@ -71,7 +71,7 @@ uv run llmprobe run config.yaml
 | 文件 | 用途 | 运行方式 |
 |---|---|---|
 | `configs/vllm-chat.yaml` | 单个本地 vLLM/OpenAI-compatible chat 服务；并发 1/2/4/8，输入 128/1024，输出 128，启用 warmup 和 `ignore_eos` | 修改 `base_url`/`model` 后直接运行 |
-| `configs/compare.yaml` | 多 target 对比：本地 vLLM + DeepSeek 官方 API；重复 2 轮，适合比较模型/服务 | 设置 `DEEPSEEK_API_KEY` 后运行 |
+| `configs/compare.yaml` | 多 target 对比：本地 vLLM + DeepSeek 官方 API；3 个显式 cell，比较并发 1/4/8 下的表现 | 设置 `DEEPSEEK_API_KEY` 后运行 |
 | `configs/per-target-tokenizers.yaml` | 每个 target 使用各自 tokenizer；包含 Qwen3.8-Flash-Next、DeepSeek-V4.1-Flash、GLM-5.3 示例 | 修改本地端口/model 后运行，需 tokenizer extra |
 
 ```bash
@@ -109,9 +109,10 @@ workload:
   dataset: random
   requests_per_cell: 16
   warmup_requests: 2
-  concurrency: [1, 2, 4]
-  input_lengths: [512]
-  output_lengths: [128]
+  cells:
+    - 4096-512-2
+    - 4096-512-4
+    - 8192-512-2
   system_prompt: ""
   tokenizer: null
   stream_options: auto
@@ -152,29 +153,52 @@ targets:
 | `dataset` | `random` | v1 仅支持 `random`，使用 vLLM 风格确定性随机 prompt |
 | `requests_per_cell` | `50` | 每个 target × cell 的正式请求数；必须 ≥ 最大并发 |
 | `warmup_requests` | `2` | 每个 target × cell 的预热请求数；不计入指标；`0` 表示关闭 |
-| `concurrency` | `[1]` | closed-loop 并发扫描列表 |
-| `input_lengths` | `[512]` | 输入内容 token 数目标列表；包含 system prompt，不含 chat template |
-| `output_lengths` | `[128]` | 生成 token 数上限列表；实际输出可能因 EOS 提前结束 |
+| `cells` | `[512-128-1]` | 显式 workload 组合列表，格式为 `输入长度-输出上限-并发` |
 | `system_prompt` | `""` | 可选 system prompt，会计入输入 token 预算 |
 | `tokenizer` | `null` | 全局参考 tokenizer，可用内置别名、`tokenizer.json`、模型目录或 HF repo id |
 | `stream_options` | `auto` | `auto`：probe 探测 usage；`include_usage`：强制发送；`none`：关闭 |
 
-`workload.concurrency` 是并发扫描参数。Cell 由 `concurrency × input_length × output_length` 决定，ID 形如：
+`workload.cells` 直接列出要测试的组合，不再自动做笛卡尔积。每个 cell 使用：
 
 ```text
-in512-out128-conc4
+输入内容 token 数-输出 token 上限-并发
 ```
 
-含义分别是：
+三项含义：
 
-- `in512`：目标输入内容 512 tokens
-- `out128`：最大输出 128 tokens
-- `conc4`：并发 4
+- 第一项：目标输入内容 token 数，包含 `system_prompt`，不含 chat template。
+- 第二项：生成 token 数上限，对应请求中的 `max_tokens` / `max_completion_tokens`。
+- 第三项：同时进行的请求数，也就是该 cell 的 closed-loop 并发。
 
-每次配置运行对每个 cell 正式测量一次；需要独立重复时，重新运行配置即可。请求数计算：
+每个列表项就是一组独立测试，不会与其他项自动组合。例如：
+
+```yaml
+cells:
+  - 4096-512-2
+  - 4096-512-4
+  - 8192-1024-8
+```
+
+会生成 3 个 cell，ID 分别为：
 
 ```text
-cell 数 = len(concurrency) × len(input_lengths) × len(output_lengths)
+in4096-out512-conc2
+in4096-out512-conc4
+in8192-out1024-conc8
+```
+
+也支持等价的列表或映射写法：
+
+```yaml
+cells:
+  - [4096, 512, 2]
+  - {input_length: 4096, output_length: 512, concurrency: 4}
+```
+
+每个 cell 对每个 target 正式测量一次；需要独立重复时，重新运行配置即可。请求数计算：
+
+```text
+cell 数 = len(cells)
 正式请求 = cell 数 × target 数 × requests_per_cell
 预热请求 = cell 数 × target 数 × warmup_requests
 ```
@@ -254,8 +278,8 @@ targets:
 - 无 tokenizer 时（fallback approximation）：使用确定性随机词序列和约 4 字符/token 的启发式接近目标长度；没有服务端 usage 时通常无法得到输入 token 数。
 - `workload.tokenizer` 是全局参考 tokenizer；`targets[].tokenizer` 可覆盖它。tokenizer 只用于构造 prompt 和估算，实际输入/输出 token 数优先采用各服务的 usage，并记录 token count source 与 `estimated` 标记。
 - 使用内置别名时不需要复制模型权重；只需要 `tokenizer.json`。
-- `random-range-ratio` 在 v1 中尚未实现；同一 cell 的 `input_lengths` / `output_lengths` 是固定目标值，不是随机区间。
-- `concurrency`、`input_lengths`、`output_lengths` 是扫描列表。
+- `random-range-ratio` 在 v1 中尚未实现；每个 cell 的输入目标、输出上限和并发都是显式固定值。
+- `cells` 使用 `输入长度-输出上限-并发` 三元组，例如 `4096-512-2`。
 - `requests_per_cell` 必须不小于最大并发。
 - `warmup_requests` 按 target × cell 执行，不计入结果。
 - `stream_options: auto` 会用一个排除在正式结果外的 probe 探测 usage 支持；`include_usage` 强制发送，`none` 强制关闭。

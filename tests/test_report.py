@@ -9,7 +9,7 @@ import pytest
 import yaml
 from rich.console import Console
 
-from llmprobe.config import AppConfig, RunConfig, TargetConfig, WorkloadConfig
+from llmprobe.config import AppConfig, CellSpec, RunConfig, TargetConfig, WorkloadConfig
 from llmprobe.metrics import summarize_results
 from llmprobe.models import Cell, CellSummary, RequestResult, RunResult, TargetCapability
 from llmprobe.report import (
@@ -37,9 +37,7 @@ def make_config(tmp_path: Path) -> AppConfig:
         workload=WorkloadConfig(
             requests_per_cell=1,
             warmup_requests=0,
-            concurrency=(1,),
-            input_lengths=(8,),
-            output_lengths=(2,),
+            cells=(CellSpec(8, 2, 1),),
         ),
         targets=(
             TargetConfig(

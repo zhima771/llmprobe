@@ -6,7 +6,14 @@ from typing import Any
 import pytest
 
 from llmprobe.client import TargetProbeError
-from llmprobe.config import AppConfig, ConfigError, RunConfig, TargetConfig, WorkloadConfig
+from llmprobe.config import (
+    AppConfig,
+    CellSpec,
+    ConfigError,
+    RunConfig,
+    TargetConfig,
+    WorkloadConfig,
+)
 from llmprobe.models import Cell, GeneratedPrompt, RequestResult
 from llmprobe.runner import BenchmarkRunner, NullProgress, preflight_workload
 
@@ -56,9 +63,12 @@ def config(
         workload=WorkloadConfig(
             requests_per_cell=requests_per_cell,
             warmup_requests=warmup_requests,
-            concurrency=concurrency,
-            input_lengths=input_lengths,
-            output_lengths=output_lengths,
+            cells=tuple(
+                CellSpec(input_length, output_length, concurrency_value)
+                for input_length in input_lengths
+                for output_length in output_lengths
+                for concurrency_value in concurrency
+            ),
             system_prompt=system_prompt,
             tokenizer=tokenizer,
             stream_options=stream_options,  # type: ignore[arg-type]

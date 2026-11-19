@@ -1,15 +1,22 @@
 from pathlib import Path
 
-from llmprobe.config import WorkloadConfig
+from llmprobe.config import CellSpec, WorkloadConfig
 from llmprobe.models import make_run_id
 from llmprobe.workload import build_cells, cell_seed
 
 
 def test_build_cells_preserves_config_order() -> None:
     workload = WorkloadConfig(
-        concurrency=(8, 1),
-        input_lengths=(128, 16),
-        output_lengths=(32, 64),
+        cells=(
+            CellSpec(128, 32, 8),
+            CellSpec(128, 32, 1),
+            CellSpec(128, 64, 8),
+            CellSpec(128, 64, 1),
+            CellSpec(16, 32, 8),
+            CellSpec(16, 32, 1),
+            CellSpec(16, 64, 8),
+            CellSpec(16, 64, 1),
+        )
     )
     cells = build_cells(workload)
     assert [cell.id for cell in cells] == [
@@ -25,7 +32,7 @@ def test_build_cells_preserves_config_order() -> None:
 
 
 def test_cell_seed_is_stable_and_repeat_sensitive() -> None:
-    workload = WorkloadConfig(concurrency=(1,), input_lengths=(10,), output_lengths=(5,))
+    workload = WorkloadConfig(cells=(CellSpec(10, 5, 1),))
     cell = build_cells(workload)[0]
     assert cell_seed(42, cell, 0) == cell_seed(42, cell, 0)
     assert cell_seed(42, cell, 0) != cell_seed(42, cell, 1)

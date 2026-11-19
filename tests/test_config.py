@@ -17,9 +17,9 @@ run:
   output_dir: results
 workload:
   requests_per_cell: 4
-  concurrency: [1, 2]
-  input_lengths: [16]
-  output_lengths: [8]
+  cells:
+    - 16-8-1
+    - 16-8-2
 targets:
   - name: local
     base_url: http://127.0.0.1:8000/v1
@@ -65,7 +65,7 @@ def test_reserved_request_param_is_rejected(tmp_path: Path) -> None:
 
 
 def test_max_concurrency_cannot_exceed_requests_per_cell(tmp_path: Path) -> None:
-    text = MINIMAL.replace("concurrency: [1, 2]", "concurrency: [8]")
+    text = MINIMAL.replace("    - 16-8-2", "    - 16-8-8")
     with pytest.raises(ConfigError, match="requests_per_cell"):
         load_config(write_config(tmp_path, text), environ={})
 
@@ -262,3 +262,44 @@ def test_direct_api_key_is_supported_and_env_conflict_is_rejected(tmp_path: Path
     conflict = text.replace("    api_key: sk-direct\n", "    api_key: sk-direct\n    api_key_env: TEST_KEY\n")
     with pytest.raises(ConfigError, match="api_key"):
         load_config(write_config(tmp_path, conflict), environ={"TEST_KEY": "env-key"})
+
+
+def test_explicit_cell_formats_and_duplicate_rejection(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "    - 16-8-1\n    - 16-8-2",
+        "    - 4096-512-2\n    - [8192, 1024, 4]\n"
+        "    - {input_length: 2048, output_length: 256, concurrency: 1}",
+    )
+    config = load_config(write_config(tmp_path, text), environ={})
+    assert [
+        (cell.input_length, cell.output_length, cell.concurrency)
+        for cell in config.workload.cells
+    ] == [(4096, 512, 2), (8192, 1024, 4), (2048, 256, 1)]
+
+    duplicate = MINIMAL.replace("    - 16-8-2", "    - 16-8-1")
+    with pytest.raises(ConfigError, match="duplicate"):
+        load_config(write_config(tmp_path, duplicate), environ={})
+
+@pytest.mark.parametrize(
+    "cell",
+    ["16-8", "16-8-2-1", "16-8-0", "0-8-2", "16-0-2", "16-8-two"],
+)
+def test_invalid_cell_format_is_rejected(tmp_path: Path, cell: str) -> None:
+    text = MINIMAL.replace("    - 16-8-1\n    - 16-8-2", f"    - {cell}")
+    with pytest.raises(ConfigError, match="workload.cells"):
+        load_config(write_config(tmp_path, text), environ={})
+
+
+def test_empty_cells_are_rejected(tmp_path: Path) -> None:
+    text = MINIMAL.replace("  cells:\n    - 16-8-1\n    - 16-8-2", "  cells: []")
+    with pytest.raises(ConfigError, match="non-empty"):
+        load_config(write_config(tmp_path, text), environ={})
+
+
+def test_legacy_scan_fields_point_to_explicit_cells(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "    - 16-8-1\n    - 16-8-2",
+        "    concurrency: [1, 2]\n    input_lengths: [16]\n    output_lengths: [8]",
+    )
+    with pytest.raises(ConfigError, match="workload.cells"):
+        load_config(write_config(tmp_path, text), environ={})

@@ -18,7 +18,7 @@
 
 1. 一个 YAML 配置可以同时声明多个待测服务，并对它们执行完全相同的请求矩阵。
 2. 能可靠测量流式请求的 TTFT、TPOT、ITL、E2EL、请求吞吐和 token 吞吐。
-3. 能扫描并发数、输入长度、输出长度，并支持 warmup、重复轮次和冷却时间。
+3. 能显式组合并发数、输入长度和输出长度，并支持 warmup 和冷却时间。
 4. 原始请求级数据与聚合结果均落盘，便于回归比较和后续二次分析。
 5. 对网络错误、HTTP 错误、流中断、超时和不支持 usage 的服务有明确行为。
 6. 单元测试和本地 mock 服务集成测试可覆盖核心计时逻辑。
@@ -88,9 +88,11 @@ workload:
   dataset: random
   requests_per_cell: 60
   warmup_requests: 3
-  concurrency: [1, 2, 4, 8]
-  input_lengths: [128, 1024]
-  output_lengths: [128, 512]
+  cells:
+    - 128-128-1
+    - 128-128-4
+    - 1024-128-1
+    - 1024-128-4
   system_prompt: ""
   tokenizer: /models/Qwen3-8B/tokenizer.json
   stream_options: auto
@@ -129,15 +131,16 @@ targets:
 - `requests_per_cell` 必须大于等于最大并发。
 - `dataset` 第一版仅支持 `random`，默认 `random`。
 - `warmup_requests` 不计入任何聚合指标，按 target × cell 执行，详细语义见 6.4。
-- `input_lengths` 是目标“内容 token 数”，包含 `system_prompt`，但不包含 chat template 和特殊 token。chat target 将 system prompt 放入 system message；completions target 将 system prompt 与实际 prompt 拼接。若已知 system prompt 已超过目标长度，配置校验失败。
-- `output_lengths` 是生成 token 数上限。没有 tokenizer 时输入长度按确定性文本长度近似；所有实际 token 数优先采用服务端 usage，并记录来源。
+- `cells` 中第一项是目标“内容 token 数”，包含 `system_prompt`，但不包含 chat template 和特殊 token。chat target 将 system prompt 放入 system message；completions target 将 system prompt 与实际 prompt 拼接。若已知 system prompt 已超过目标长度，配置校验失败。
+- `cells` 中第二项是生成 token 数上限，`cells` 中第三项是并发数。没有 tokenizer 时输入长度按确定性文本长度近似；所有实际 token 数优先采用服务端 usage，并记录来源。
+- `cells` 的每一项都是一个独立组合，不再根据并发、输入长度、输出长度列表自动做笛卡尔积。
 - `workload.tokenizer` 是全局参考 tokenizer，可指向内置别名、本地 `tokenizer.json`、包含 `tokenizer.json` 的模型目录，或 HF repo id。默认安装不强制引入 tokenizer 依赖，缺省时使用内置的确定性文本生成器。
 - `targets[].tokenizer` 可覆盖全局 tokenizer。相同 tokenizer 的 target 共享同一组 prompt；不同 tokenizer 的 target 各自生成目标 token 长度的 prompt，使不同模型的输入 token 长度更准确。实际 token 数仍以服务端 usage 为准。
 - 内置 tokenizer 位于 `src/llmprobe/tokenizers/`，提供 `qwen3.8-flash-next`、`qwen3.6-35b`、`deepseek-v4.1-flash`、`glm-5.3` 别名；来源、源提交、SHA256、许可证和直接文件 URL 记录在 `manifest.json`，许可证文本随包分发。
 - `max_tokens_field` 是 target 级配置，支持 `max_tokens` 和 `max_completion_tokens`，默认 `max_tokens` 以获得更广的兼容性。这样同一矩阵可以公平比较使用不同字段的官方 API。
 - `stream_options: auto` 先尝试 `stream_options.include_usage=true` 获取精确 token 数。能力探测在正式测量前通过一个被排除的 probe/warmup 请求完成；若服务明确不支持该参数，则去掉该字段重试并记住该 target 的能力。正式测量不会因探测而重复。
 - `request_params` 原样合并进请求体，用于 `temperature`、`top_p`、`ignore_eos` 等厂商扩展。保留字段 `model`、`messages`、`prompt`、`stream`、`stream_options`、`max_tokens`、`max_completion_tokens` 不允许覆盖，配置校验时报错；生成长度只通过 `max_tokens_field` 控制。
-- API key 只从环境变量读取，写日志和结果前必须脱敏。headers 支持 `${ENV_VAR}` 展开；缺失环境变量属于配置错误。
+- API key 推荐通过 `api_key_env` 从环境变量读取，也支持直接配置 `api_key`；写日志和结果前必须脱敏。headers 支持 `${ENV_VAR}` 展开；缺失环境变量属于配置错误。
 - `timeout_s` 是单个请求从发起到流结束的总超时。
 - 可选 `http2`、`verify_tls`、`ca_bundle`，用于网关和自签名本地服务。
 
@@ -145,10 +148,10 @@ targets:
 
 ### 6.1 矩阵
 
-workload cell 为：
+workload cell 为显式配置项：
 
 ```text
-(concurrency, input_length, output_length)
+(input_length, output_length, concurrency)
 ```
 
 每次正式测量是该 cell 下的一个 target。执行顺序为：

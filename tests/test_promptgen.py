@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import pytest
 
-from llmprobe.config import ConfigError, WorkloadConfig
+from llmprobe.config import CellSpec, ConfigError, WorkloadConfig
 from llmprobe.promptgen import generate_prompt
 from llmprobe.tokenization import load_tokenizer
 from llmprobe.workload import build_cells
@@ -57,6 +57,19 @@ class NonRoundTripTokenizer:
         return " ".join(text.split()[:max_tokens])
 
 
+def workload_config(
+    *,
+    input_length: int,
+    output_length: int,
+    concurrency: int = 1,
+    system_prompt: str = "",
+) -> WorkloadConfig:
+    return WorkloadConfig(
+        cells=(CellSpec(input_length, output_length, concurrency),),
+        system_prompt=system_prompt,
+    )
+
+
 def install_fake_tokenizers(monkeypatch: pytest.MonkeyPatch, tokenizer_class: type) -> None:
     module = types.ModuleType("tokenizers")
     module.Tokenizer = tokenizer_class  # type: ignore[attr-defined]
@@ -64,8 +77,8 @@ def install_fake_tokenizers(monkeypatch: pytest.MonkeyPatch, tokenizer_class: ty
 
 
 def test_prompt_is_deterministic_and_varies_by_request() -> None:
-    workload = WorkloadConfig(
-        concurrency=(2,), input_lengths=(64,), output_lengths=(8,), system_prompt="be terse"
+    workload = workload_config(
+        concurrency=2, input_length=64, output_length=8, system_prompt="be terse"
     )
     cell = build_cells(workload)[0]
     first = generate_prompt(7, cell, 0, 0, workload, None)
@@ -78,10 +91,9 @@ def test_prompt_is_deterministic_and_varies_by_request() -> None:
 
 
 def test_tokenizer_prompt_targets_total_content_tokens() -> None:
-    workload = WorkloadConfig(
-        concurrency=(1,),
-        input_lengths=(40,),
-        output_lengths=(8,),
+    workload = workload_config(
+        input_length=40,
+        output_length=8,
         system_prompt="system instructions",
     )
     cell = build_cells(workload)[0]
@@ -98,8 +110,8 @@ def test_tokenizer_prompt_targets_total_content_tokens() -> None:
 
 
 def test_prompt_set_changes_by_repeat() -> None:
-    workload = WorkloadConfig(
-        concurrency=(1,), input_lengths=(32,), output_lengths=(4,), system_prompt="sys"
+    workload = workload_config(
+        input_length=32, output_length=4, system_prompt="sys"
     )
     cell = build_cells(workload)[0]
     tokenizer = WordTokenizer()
@@ -109,8 +121,8 @@ def test_prompt_set_changes_by_repeat() -> None:
 
 
 def test_prompt_is_invariant_to_global_random_state() -> None:
-    workload = WorkloadConfig(
-        concurrency=(1,), input_lengths=(48,), output_lengths=(4,), system_prompt="sys"
+    workload = workload_config(
+        input_length=48, output_length=4, system_prompt="sys"
     )
     cell = build_cells(workload)[0]
     tokenizer = WordTokenizer()
@@ -130,7 +142,7 @@ def test_prompt_is_invariant_to_global_random_state() -> None:
 
 
 def test_non_round_trip_tokenizer_returns_best_effort_prompt() -> None:
-    workload = WorkloadConfig(concurrency=(1,), input_lengths=(10,), output_lengths=(4,))
+    workload = workload_config(input_length=10, output_length=4)
     cell = build_cells(workload)[0]
     tokenizer = NonRoundTripTokenizer()
 
@@ -146,8 +158,8 @@ def test_non_round_trip_tokenizer_returns_best_effort_prompt() -> None:
 
 
 def test_system_prompt_must_fit_in_content_token_budget() -> None:
-    workload = WorkloadConfig(
-        concurrency=(1,), input_lengths=(2,), output_lengths=(4,), system_prompt="one two"
+    workload = workload_config(
+        input_length=2, output_length=4, system_prompt="one two"
     )
     cell = build_cells(workload)[0]
     with pytest.raises(ConfigError, match="too long"):
@@ -155,8 +167,8 @@ def test_system_prompt_must_fit_in_content_token_budget() -> None:
 
 
 def test_completions_text_concatenates_system_and_user() -> None:
-    workload = WorkloadConfig(
-        concurrency=(1,), input_lengths=(8,), output_lengths=(2,), system_prompt="sys"
+    workload = workload_config(
+        input_length=8, output_length=2, system_prompt="sys"
     )
     cell = build_cells(workload)[0]
     prompt = generate_prompt(1, cell, 0, 0, workload, None)

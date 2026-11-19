@@ -13,9 +13,16 @@ workload:
   dataset: random
   requests_per_cell: 60
   warmup_requests: 3
-  concurrency: [1, 2, 4, 8]
-  input_lengths: [128, 1024]
-  output_lengths: [128]
+  # 每个 cell：输入内容 token 数-输出 token 上限-并发
+  cells:
+    - 128-128-1
+    - 128-128-2
+    - 128-128-4
+    - 128-128-8
+    - 1024-128-1
+    - 1024-128-2
+    - 1024-128-4
+    - 1024-128-8
   system_prompt: ""
   # 可选：内置别名、tokenizer.json 路径、模型目录或 HF repo id
   tokenizer: null

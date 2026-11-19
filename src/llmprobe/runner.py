@@ -131,7 +131,7 @@ class BenchmarkRunner:
         clients: dict[str, Any] = {}
         headers: dict[str, dict[str, str]] = {}
         include_usage: dict[str, bool] = {}
-        max_concurrency = max(self.config.workload.concurrency)
+        max_concurrency = max(cell.concurrency for cell in cells)
 
         try:
             for target in self.config.targets:

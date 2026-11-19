@@ -42,13 +42,18 @@ class RunConfig:
 
 
 @dataclass(frozen=True)
+class CellSpec:
+    input_length: int
+    output_length: int
+    concurrency: int = 1
+
+
+@dataclass(frozen=True)
 class WorkloadConfig:
     dataset: Literal["random"] = "random"
     requests_per_cell: int = 50
     warmup_requests: int = 2
-    concurrency: tuple[int, ...] = (1,)
-    input_lengths: tuple[int, ...] = (512,)
-    output_lengths: tuple[int, ...] = (128,)
+    cells: tuple[CellSpec, ...] = (CellSpec(input_length=512, output_length=128),)
     system_prompt: str = ""
     tokenizer: str | None = None
     stream_options: Literal["auto", "include_usage", "none"] = "auto"
@@ -158,17 +163,74 @@ def _parse_run(raw: Any) -> RunConfig:
     )
 
 
+def _parse_cell(raw: Any, index: int) -> CellSpec:
+    path = f"workload.cells[{index}]"
+    if isinstance(raw, str):
+        match = re.fullmatch(r"\s*(\d+)\s*-\s*(\d+)\s*-\s*(\d+)\s*", raw)
+        if not match:
+            raise ConfigError(
+                f"{path} must use input-output-concurrency format, e.g. 4096-512-2"
+            )
+        input_length, output_length, concurrency = (int(value) for value in match.groups())
+    elif isinstance(raw, list):
+        if len(raw) != 3:
+            raise ConfigError(f"{path} must contain exactly 3 integers")
+        input_length, output_length, concurrency = raw
+        input_length = _integer(input_length, f"{path}[0]", minimum=1)
+        output_length = _integer(output_length, f"{path}[1]", minimum=1)
+        concurrency = _integer(concurrency, f"{path}[2]", minimum=1)
+    elif isinstance(raw, dict):
+        _unknown_keys(raw, {"input_length", "output_length", "concurrency"}, path)
+        input_length = _integer(
+            raw.get("input_length"), f"{path}.input_length", minimum=1
+        )
+        output_length = _integer(
+            raw.get("output_length"), f"{path}.output_length", minimum=1
+        )
+        concurrency = _integer(
+            raw.get("concurrency"), f"{path}.concurrency", minimum=1
+        )
+    else:
+        raise ConfigError(
+            f"{path} must be a string like 4096-512-2, a [input, output, concurrency] list, "
+            "or a mapping"
+        )
+    if input_length < 1 or output_length < 1 or concurrency < 1:
+        raise ConfigError(f"{path} values must be positive integers")
+    return CellSpec(
+        input_length=input_length,
+        output_length=output_length,
+        concurrency=concurrency,
+    )
+
+
+def _parse_cells(raw: Any) -> tuple[CellSpec, ...]:
+    if not isinstance(raw, list) or not raw:
+        raise ConfigError("workload.cells must be a non-empty list")
+    cells = tuple(_parse_cell(item, index) for index, item in enumerate(raw))
+    keys = [(cell.input_length, cell.output_length, cell.concurrency) for cell in cells]
+    if len(keys) != len(set(keys)):
+        raise ConfigError("workload.cells must not contain duplicate combinations")
+    return cells
+
+
 def _parse_workload(raw: Any) -> WorkloadConfig:
     data = _mapping(raw, "workload")
+    legacy_keys = sorted(
+        {"concurrency", "input_lengths", "output_lengths"}.intersection(data)
+    )
+    if legacy_keys:
+        raise ConfigError(
+            "workload.concurrency/input_lengths/output_lengths are no longer supported; "
+            "use workload.cells with input-output-concurrency entries such as 4096-512-2"
+        )
     _unknown_keys(
         data,
         {
             "dataset",
             "requests_per_cell",
             "warmup_requests",
-            "concurrency",
-            "input_lengths",
-            "output_lengths",
+            "cells",
             "system_prompt",
             "tokenizer",
             "stream_options",
@@ -192,9 +254,7 @@ def _parse_workload(raw: Any) -> WorkloadConfig:
         warmup_requests=_integer(
             data.get("warmup_requests", 2), "workload.warmup_requests", minimum=0
         ),
-        concurrency=_int_tuple(data.get("concurrency", [1]), "workload.concurrency"),
-        input_lengths=_int_tuple(data.get("input_lengths", [512]), "workload.input_lengths"),
-        output_lengths=_int_tuple(data.get("output_lengths", [128]), "workload.output_lengths"),
+        cells=_parse_cells(data.get("cells", ["512-128-1"])),
         system_prompt=_string(
             data.get("system_prompt", ""), "workload.system_prompt", allow_empty=True
         ),
@@ -313,7 +373,7 @@ def load_config(
     names = [target.name for target in targets]
     if len(names) != len(set(names)):
         raise ConfigError("target names must be unique")
-    max_concurrency = max(workload.concurrency)
+    max_concurrency = max(cell.concurrency for cell in workload.cells)
     if max_concurrency > workload.requests_per_cell:
         raise ConfigError(
             "workload.requests_per_cell must be >= the largest concurrency "

@@ -46,9 +46,7 @@ def write_config(
         "workload": {
             "requests_per_cell": 4,
             "warmup_requests": 0,
-            "concurrency": [2],
-            "input_lengths": [8],
-            "output_lengths": [4],
+            "cells": ["8-4-2"],
             "system_prompt": system_prompt,
             "tokenizer": tokenizer,
             "stream_options": "auto",

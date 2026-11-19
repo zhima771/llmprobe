@@ -13,9 +13,11 @@ workload:
   dataset: random
   requests_per_cell: 40
   warmup_requests: 2
-  concurrency: [1, 4, 8]
-  input_lengths: [512]
-  output_lengths: [128]
+  # 每个 cell：输入内容 token 数-输出 token 上限-并发
+  cells:
+    - 512-128-1
+    - 512-128-4
+    - 512-128-8
   system_prompt: ""
   tokenizer: null
   stream_options: auto

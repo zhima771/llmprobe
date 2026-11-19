@@ -7,19 +7,15 @@ from llmprobe.models import Cell
 
 
 def build_cells(workload: WorkloadConfig) -> list[Cell]:
-    cells: list[Cell] = []
-    for input_length in workload.input_lengths:
-        for output_length in workload.output_lengths:
-            for concurrency in workload.concurrency:
-                cells.append(
-                    Cell(
-                        id=f"in{input_length}-out{output_length}-conc{concurrency}",
-                        concurrency=concurrency,
-                        input_length=input_length,
-                        output_length=output_length,
-                    )
-                )
-    return cells
+    return [
+        Cell(
+            id=f"in{spec.input_length}-out{spec.output_length}-conc{spec.concurrency}",
+            concurrency=spec.concurrency,
+            input_length=spec.input_length,
+            output_length=spec.output_length,
+        )
+        for spec in workload.cells
+    ]
 
 
 def cell_seed(global_seed: int, cell: Cell, repeat: int) -> int:
