@@ -178,26 +178,46 @@ def test_config_to_dict_serializes_paths_and_redacts_nested_secrets(tmp_path: Pa
     "key",
     [
         "Authorization",
+        "key",
         "api_key",
         "api_keys",
+        "apikey",
+        "APIKEY",
+        "x_apikey",
+        "xapikey",
         "apiKey",
         "apiKeyValue",
         "X-API-Key",
+        "apiToken",
+        "api_token",
+        "githubToken",
+        "github_token",
+        "jwtToken",
+        "jwt_token",
+        "oauth2_token",
         "access_token",
         "access_tokens",
         "refresh_token",
         "session_token",
         "auth_token",
         "id_token",
+        "client_token",
         "password",
         "passwords",
         "password_hash",
+        "dbpassword",
         "secret",
         "secrets",
         "client_secret",
         "client_secrets",
+        "clientsecret",
+        "private_key",
+        "privatekey",
+        "secretkey",
+        "signingkey",
         "cookie",
         "cookies",
+        "setcookie",
         "credential",
         "credentials",
     ],
@@ -218,7 +238,17 @@ def test_sensitive_key_variants_are_redacted(key: str) -> None:
         "max_token",
         "stop_token",
         "stop_tokens",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "prompt_tokens",
+        "completion_tokens",
+        "max_completion_tokens",
+        "max_output_tokens",
+        "token_count",
         "api_key_env",
+        "auth_method",
+        "cookies_enabled",
     ],
 )
 def test_benign_token_keys_are_not_redacted(key: str) -> None:
@@ -264,7 +294,7 @@ def test_request_serialization_preserves_unavailable_latencies() -> None:
 
 def test_write_report_creates_all_files_and_redacts_secret(tmp_path: Path) -> None:
     config = make_config(tmp_path)
-    result_item = make_result()
+    result_item = replace(make_result(), started_at=0.0, stream_end_s=2.0)
     summary = make_summary(result_item)
     run = make_run(
         [summary],
@@ -296,6 +326,10 @@ def test_write_report_creates_all_files_and_redacts_secret(tmp_path: Path) -> No
         "completed": "1",
         "failed": "0",
         "error_rate": "0.0",
+        "duration_s": "2.0",
+        "request_throughput": "0.5",
+        "output_token_throughput": "1.0",
+        "total_token_throughput": "5.0",
         "ttft_mean_ms": "10.0",
         "ttft_p50_ms": "10.0",
         "ttft_p95_ms": "10.0",
@@ -314,10 +348,6 @@ def test_write_report_creates_all_files_and_redacts_secret(tmp_path: Path) -> No
     }
     for field, expected in expected_csv.items():
         assert rows[0][field] == expected
-    assert rows[0]["duration_s"] != ""
-    assert rows[0]["request_throughput"] != ""
-    assert rows[0]["output_token_throughput"] != ""
-    assert rows[0]["total_token_throughput"] != ""
     payload = json.loads((output / "run.json").read_text(encoding="utf-8"))
     assert payload["schema_version"] == 1
     assert payload["capabilities"][0]["name"] == "mock"

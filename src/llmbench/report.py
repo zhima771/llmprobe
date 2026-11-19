@@ -33,14 +33,48 @@ _SENSITIVE_TOKENS = {
     "cookies",
     "credential",
     "credentials",
+}
+_EXACT_SENSITIVE_KEYS = {"key"}
+_BENIGN_COMPACT_KEYS = {
+    "maxtokens",
+    "maxtoken",
+    "stoptoken",
+    "stoptokens",
+    "inputtokens",
+    "outputtokens",
+    "totaltokens",
+    "prompttokens",
+    "completiontokens",
+    "maxcompletiontokens",
+    "maxoutputtokens",
+    "tokencount",
+    "apikeyenv",
+    "authmethod",
+    "cookiesenabled",
+}
+_COMPACT_CREDENTIAL_FRAGMENTS = (
+    "apikey",
+    "password",
+    "secret",
+    "privatekey",
+    "signingkey",
+    "setcookie",
+)
+_TOKEN_QUALIFIERS = {
+    "access",
+    "refresh",
+    "api",
     "auth",
     "bearer",
+    "github",
+    "jwt",
+    "oauth",
+    "oauth2",
+    "session",
+    "id",
+    "client",
 }
-_TOKEN_QUALIFIERS = {"access", "refresh", "session", "auth", "id", "bearer", "oauth"}
 _TOKEN_NAMES = {"token", "tokens"}
-_KEY_QUALIFIERS = {"api", "private", "signing", "secret"}
-_KEY_NAMES = {"key", "keys"}
-_API_KEY_ENV_TOKENS = ("api", "key", "env")
 _CSV_FIELDS = [
     "target",
     "cell_id",
@@ -113,17 +147,30 @@ def _has_adjacent_tokens(
     )
 
 
+def _has_compact_qualified_token(compact: str) -> bool:
+    return any(
+        compact.endswith(qualifier + name)
+        for qualifier in _TOKEN_QUALIFIERS
+        for name in _TOKEN_NAMES
+    )
+
+
 def _is_sensitive_key(key: Any) -> bool:
     tokens = _normalized_tokens(key)
     if not tokens:
         return False
-    if tokens == _API_KEY_ENV_TOKENS:
+    compact = "".join(tokens)
+    if compact in _BENIGN_COMPACT_KEYS:
         return False
+    if compact in _EXACT_SENSITIVE_KEYS:
+        return True
+    if any(fragment in compact for fragment in _COMPACT_CREDENTIAL_FRAGMENTS):
+        return True
     if _SENSITIVE_TOKENS.intersection(tokens):
         return True
     if _has_adjacent_tokens(tokens, _TOKEN_QUALIFIERS, _TOKEN_NAMES):
         return True
-    if _has_adjacent_tokens(tokens, _KEY_QUALIFIERS, _KEY_NAMES):
+    if _has_compact_qualified_token(compact):
         return True
     return tokens == ("token",)
 
