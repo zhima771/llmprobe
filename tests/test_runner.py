@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from llmbench.client import TargetProbeError
-from llmbench.config import AppConfig, RunConfig, TargetConfig, WorkloadConfig
+from llmbench.config import AppConfig, ConfigError, RunConfig, TargetConfig, WorkloadConfig
 from llmbench.models import Cell, GeneratedPrompt, RequestResult
 from llmbench.runner import BenchmarkRunner, NullProgress
 
@@ -44,6 +44,8 @@ def config(
     concurrencies: tuple[int, ...] = (1,),
     input_lengths: tuple[int, ...] = (8,),
     output_lengths: tuple[int, ...] = (2,),
+    system_prompt: str = "",
+    tokenizer: str | None = None,
 ) -> AppConfig:
     return AppConfig(
         run=RunConfig(
@@ -58,6 +60,8 @@ def config(
             concurrencies=concurrencies,
             input_lengths=input_lengths,
             output_lengths=output_lengths,
+            system_prompt=system_prompt,
+            tokenizer=tokenizer,
             stream_options=stream_options,  # type: ignore[arg-type]
         ),
         targets=(
@@ -208,7 +212,7 @@ def test_probe_runs_once_per_target_only_for_auto(
 @pytest.mark.parametrize(
     ("mode", "probe_supported", "expected_probes", "expected_sent", "expected_usage"),
     [
-        ("none", None, 0, False, False),
+        ("none", None, 0, False, None),
         ("include_usage", None, 0, True, None),
         ("auto", True, 2, True, True),
         ("auto", False, 2, False, False),
@@ -269,6 +273,65 @@ def test_capabilities_and_include_usage_follow_stream_option_mode(
         assert capability.available is True
         assert capability.stream_options_sent is expected_sent
         assert capability.usage_stream_supported is expected_usage
+
+
+class LongSystemTokenizer:
+    is_tokenizer = True
+    vocab_size = 100
+
+    def count(self, text: str) -> int:
+        return 100 if text else 0
+
+    def encode_ids(self, text: str) -> list[int]:
+        return list(range(len(text)))
+
+    def decode_ids(self, token_ids: list[int]) -> str:
+        return "x" * len(token_ids)
+
+    def truncate(self, text: str, max_tokens: int) -> str:
+        return text[:max_tokens]
+
+
+def test_preflight_rejects_too_long_system_prompt_before_client_creation(
+    tmp_path: Path, fake_http_clients: list[FakeClient]
+) -> None:
+    runner = BenchmarkRunner(
+        config(
+            tmp_path,
+            stream_options="none",
+            input_lengths=(32, 8),
+            system_prompt="system",
+        ),
+        progress=NullProgress(),
+        environ={},
+        tokenizer=LongSystemTokenizer(),
+    )
+
+    with pytest.raises(ConfigError, match="too long"):
+        asyncio.run(runner.run())
+
+    assert fake_http_clients == []
+
+
+def test_preflight_tokenizer_load_failure_happens_before_client_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_http_clients: list[FakeClient],
+) -> None:
+    def fail_load(spec: str | None) -> None:
+        raise ConfigError(f"failed to load tokenizer {spec!r}")
+
+    monkeypatch.setattr("llmbench.runner.load_tokenizer", fail_load)
+    runner = BenchmarkRunner(
+        config(tmp_path, stream_options="none", tokenizer="missing-tokenizer"),
+        progress=NullProgress(),
+        environ={},
+    )
+
+    with pytest.raises(ConfigError, match="tokenizer"):
+        asyncio.run(runner.run())
+
+    assert fake_http_clients == []
 
 
 def test_prompts_are_shared_by_targets_and_fresh_per_repeat(

@@ -18,6 +18,9 @@ from llmbench.config import AppConfig, sanitize_url
 from llmbench.models import CellSummary, RequestResult, RunResult
 
 _REDACTED = "<redacted>"
+_ENV_PLACEHOLDER_ONLY = re.compile(
+    r"\s*(?:\$\{[A-Za-z_][A-Za-z0-9_]*\})+\s*"
+)
 _CAMEL_BOUNDARY = re.compile(
     r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
 )
@@ -190,13 +193,27 @@ def _redact(value: Any) -> Any:
     return value
 
 
+def _redact_target_headers(target: dict[str, Any], source: object) -> None:
+    headers = getattr(source, "headers", {})
+    target["headers"] = {
+        str(key): (
+            value
+            if isinstance(value, str) and _ENV_PLACEHOLDER_ONLY.fullmatch(value)
+            else _REDACTED
+        )
+        for key, value in headers.items()
+    }
+
+
 def config_to_dict(config: AppConfig) -> dict[str, Any]:
     data = _redact(_jsonable(config))
     targets = data.get("targets")
     if isinstance(targets, list):
-        for target in targets:
-            if isinstance(target, dict) and isinstance(target.get("base_url"), str):
-                target["base_url"] = sanitize_url(target["base_url"])
+        for source_target, target in zip(config.targets, targets, strict=True):
+            if isinstance(target, dict):
+                _redact_target_headers(target, source_target)
+                if isinstance(target.get("base_url"), str):
+                    target["base_url"] = sanitize_url(target["base_url"])
     return data
 
 
@@ -335,6 +352,10 @@ def _escape_line_breaks(value: str) -> str:
     return value.replace("\r", "\\r").replace("\n", "\\n")
 
 
+def _escape_table_cell(value: str) -> str:
+    return _escape_line_breaks(value).replace("|", "\\|")
+
+
 def _markdown(result: RunResult) -> str:
     lines = [
         f"# Benchmark Report: {result.run_id}",
@@ -353,8 +374,8 @@ def _markdown(result: RunResult) -> str:
         lines.append(
             "| {target} | {cell} | {repeat} | {ok}/{failed} | {rps} | {out_tps} | "
             "{ttft50} | {ttft95} | {tpot50} | {itl95} | {e2el95} |".format(
-                target=summary.target,
-                cell=summary.cell_id,
+                target=_escape_table_cell(summary.target),
+                cell=_escape_table_cell(summary.cell_id),
                 repeat=summary.repeat,
                 ok=summary.completed,
                 failed=summary.failed,

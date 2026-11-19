@@ -138,6 +138,10 @@ def test_config_to_dict_serializes_paths_and_redacts_nested_secrets(tmp_path: Pa
                 headers={
                     "Authorization": "Bearer super-secret",
                     "X-API-Key": "header-api-secret",
+                    "X-Subscription-Key": "subscription-secret",
+                    "X-Auth-Key": "auth-key-secret",
+                    "X-Functions-Key": "functions-secret",
+                    "X-Amz-Security-Token": "amz-security-secret",
                     "X-Tenant": "visible-tenant",
                 },
                 request_params={
@@ -157,9 +161,16 @@ def test_config_to_dict_serializes_paths_and_redacts_nested_secrets(tmp_path: Pa
 
     assert data["run"]["output_dir"] == str(tmp_path / "results")
     assert target["api_key_env"] == "PROVIDER_API_KEY"
-    assert target["headers"]["Authorization"] == "<redacted>"
-    assert target["headers"]["X-API-Key"] == "<redacted>"
-    assert target["headers"]["X-Tenant"] == "visible-tenant"
+    for header_name in (
+        "Authorization",
+        "X-API-Key",
+        "X-Subscription-Key",
+        "X-Auth-Key",
+        "X-Functions-Key",
+        "X-Amz-Security-Token",
+        "X-Tenant",
+    ):
+        assert target["headers"][header_name] == "<redacted>"
     assert target["request_params"]["nested"]["client_secret"] == "<redacted>"
     assert target["request_params"]["nested"]["clientSecret"] == "<redacted>"
     assert target["request_params"]["nested"]["plain"] == "visible"
@@ -168,11 +179,41 @@ def test_config_to_dict_serializes_paths_and_redacts_nested_secrets(tmp_path: Pa
     for secret in (
         "super-secret",
         "header-api-secret",
+        "subscription-secret",
+        "auth-key-secret",
+        "functions-secret",
+        "amz-security-secret",
+        "visible-tenant",
         "nested-secret",
         "camel-secret",
         "list-secret",
     ):
         assert secret not in rendered
+
+
+def test_config_to_dict_preserves_only_unresolved_header_placeholders(tmp_path: Path) -> None:
+    base = make_config(tmp_path)
+    config = replace(
+        base,
+        targets=(
+            replace(
+                base.targets[0],
+                headers={
+                    "X-Tenant": "${TENANT}",
+                    "X-Auth-Key": "${AUTH_KEY}",
+                    "Authorization": "Bearer ${TOKEN}",
+                    "X-Benign": "provider-value",
+                },
+            ),
+        ),
+    )
+
+    headers = config_to_dict(config)["targets"][0]["headers"]
+
+    assert headers["X-Tenant"] == "${TENANT}"
+    assert headers["X-Auth-Key"] == "${AUTH_KEY}"
+    assert headers["Authorization"] == "<redacted>"
+    assert headers["X-Benign"] == "<redacted>"
 
 
 @pytest.mark.parametrize(
@@ -405,6 +446,18 @@ def test_errors_log_escapes_embedded_line_breaks(tmp_path: Path) -> None:
 
     assert log == "mock i8-o2-c1 repeat=0 request=0: stream: first\\r\\nsecond\\nthird\\rfourth\n"
     assert log.count("\n") == 1
+
+
+def test_summary_markdown_escapes_table_delimiters_and_line_breaks(tmp_path: Path) -> None:
+    item = make_result()
+    summary = replace(make_summary(item), target="a|b", cell_id="cell\r\nid")
+    run = make_run([summary], [item])
+
+    output = write_report(run, make_config(tmp_path))
+    markdown = (output / "summary.md").read_text(encoding="utf-8")
+
+    assert "| a\\|b | cell\\r\\nid |" in markdown
+    assert "\r" not in markdown
 
 
 def test_summary_outputs_include_repeat_rows_and_cross_repeat_mean_std(

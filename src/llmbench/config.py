@@ -105,14 +105,15 @@ def _integer(value: Any, path: str, *, minimum: int) -> int:
 
 
 def _number(value: Any, path: str, *, minimum: float) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or value < minimum
-        or not math.isfinite(value)
-    ):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"{path} must be a finite number >= {minimum}")
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError:
+        raise ConfigError(f"{path} must be a finite number >= {minimum}") from None
+    if number < minimum or not math.isfinite(number):
+        raise ConfigError(f"{path} must be a finite number >= {minimum}")
+    return number
 
 
 def _boolean(value: Any, path: str) -> bool:

@@ -310,6 +310,18 @@ def test_create_http_client_configures_connection_limits_and_tls(
     assert timeout.connect == 7.5
 
 
+def test_create_http_client_supports_http2_without_network() -> None:
+    async def scenario() -> None:
+        client = create_http_client(
+            target(base_url="http://127.0.0.1:9/v1", http2=True),
+            max_connections=1,
+        )
+        assert isinstance(client, httpx.AsyncClient)
+        await client.aclose()
+
+    asyncio.run(scenario())
+
+
 def test_build_payload_chat_includes_system_message_without_usage_options() -> None:
     generated = GeneratedPrompt(
         system="be concise",
@@ -439,6 +451,66 @@ def test_stream_request_redacts_header_secrets_from_http_errors() -> None:
         assert result.error is not None
         assert secret not in result.error
         assert "REDACTED" in result.error
+
+    asyncio.run(scenario())
+
+
+def test_stream_request_redacts_query_values_from_http_errors() -> None:
+    request_target = target(base_url="http://mock/v1?api-version=QUERY-SECRET")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            text=f"request failed for {request.url}; encoded=QUERY%2DSECRET",
+        )
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await stream_request(
+                client,
+                request_target,
+                prompt(),
+                tokenizer=None,
+                include_usage=False,
+                request_index=0,
+                repeat=0,
+                cell=cell(),
+                client_queue_s=0.0,
+                headers={},
+                save_generated_text=False,
+            )
+        assert result.error is not None
+        assert "QUERY-SECRET" not in result.error
+        assert "QUERY%2DSECRET" not in result.error
+        assert "<redacted>" in result.error
+
+    asyncio.run(scenario())
+
+
+def test_probe_usage_redacts_query_values_from_errors() -> None:
+    request_target = target(base_url="http://mock/v1?api-version=QUERY-SECRET")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            text=f"probe failed for {request.url}; encoded=QUERY%2DSECRET",
+        )
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(TargetProbeError) as exc_info:
+                await probe_usage(
+                    client,
+                    request_target,
+                    prompt(),
+                    tokenizer=None,
+                    headers={},
+                    cell=cell(),
+                )
+        message = str(exc_info.value)
+        assert "QUERY-SECRET" not in message
+        assert "QUERY%2DSECRET" not in message
+        assert "<redacted>" in message
 
     asyncio.run(scenario())
 

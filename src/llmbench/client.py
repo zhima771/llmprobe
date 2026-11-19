@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import re
 import time
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, quote, quote_plus, unquote_plus, urlsplit
 
 import httpx
 
@@ -31,9 +32,44 @@ _MANAGED_PAYLOAD_KEYS = frozenset(
         "max_completion_tokens",
     }
 )
+_REDACTED_QUERY_VALUE = "<redacted>"
 
 
-def _redact_secrets(text: str, headers: Mapping[str, str]) -> str:
+def _query_value_variants(url: str) -> set[str]:
+    parsed = urlsplit(url)
+    if not parsed.query:
+        return set()
+
+    values: set[str] = set()
+    for component in parsed.query.split("&"):
+        _, separator, raw_value = component.partition("=")
+        if separator and raw_value:
+            values.add(raw_value)
+            values.add(unquote_plus(raw_value))
+    for _, value in parse_qsl(parsed.query, keep_blank_values=True):
+        if value:
+            values.add(value)
+
+    variants = set(values)
+    for value in values:
+        fully_encoded = "".join(
+            chr(byte) if byte < 128 and chr(byte).isalnum() else f"%{byte:02X}"
+            for byte in value.encode("utf-8")
+        )
+        encoded_values = {quote(value, safe=""), quote_plus(value), fully_encoded}
+        for encoded in encoded_values:
+            variants.add(encoded)
+            variants.add(re.sub(r"%[0-9A-F]{2}", lambda match: match.group(0).lower(), encoded))
+    return {value for value in variants if value}
+
+
+def _redact_secrets(
+    text: str, headers: Mapping[str, str], url: str | None = None
+) -> str:
+    if url is not None:
+        for secret in sorted(_query_value_variants(url), key=len, reverse=True):
+            text = text.replace(secret, _REDACTED_QUERY_VALUE)
+
     secrets: set[str] = set()
     for value in headers.values():
         if not value:
@@ -235,13 +271,14 @@ async def stream_request(
     error: str | None = None
     error_kind: str | None = None
     parser = SSEParser()
+    request_url = target_url(target)
 
     def observe_payload(data: dict[str, Any]) -> None:
         nonlocal first_token_at, last_token_at, token_events, finish_reason
         nonlocal usage_input, usage_output
         if data.get("error"):
             message = json.dumps(data["error"], ensure_ascii=False)
-            raise ValueError(_redact_secrets(message, headers)[:2000])
+            raise ValueError(_redact_secrets(message, headers, request_url)[:2000])
         prompt_tokens, completion_tokens = _extract_usage(data)
         if prompt_tokens is not None:
             usage_input = prompt_tokens
@@ -271,14 +308,17 @@ async def stream_request(
         async with asyncio.timeout(target.timeout_s):
             async with client.stream(
                 "POST",
-                target_url(target),
+                request_url,
                 json=build_payload(target, prompt, cell.output_length, include_usage),
                 headers=dict(headers),
             ) as response:
                 http_status = response.status_code
                 if response.status_code != 200:
                     body = (await response.aread()).decode("utf-8", errors="replace")
-                    error = f"HTTP {response.status_code}: {_redact_secrets(body, headers)[:2000]}"
+                    error = (
+                        f"HTTP {response.status_code}: "
+                        f"{_redact_secrets(body, headers, request_url)[:2000]}"
+                    )
                     error_kind = "http"
                 else:
                     done = False
@@ -329,7 +369,7 @@ async def stream_request(
 
     stream_end_s = time.perf_counter() - started_at
     if error is not None:
-        error = _redact_secrets(error, headers)
+        error = _redact_secrets(error, headers, request_url)
     if http_status == 200 and token_events == 0 and error is None:
         error = "stream completed without a token-bearing delta"
         error_kind = "no_tokens"
@@ -442,8 +482,17 @@ async def probe_usage(
         if retry.success:
             return False, retry
         raise TargetProbeError(
-            f"target {target.name} failed after disabling stream_options: {retry.error}"
+            _redact_secrets(
+                f"target {target.name} failed after disabling stream_options: {retry.error}",
+                headers,
+                target_url(target),
+            )
         )
     raise TargetProbeError(
-        f"target {target.name} capability probe failed: {result.error or result.http_status}"
+        _redact_secrets(
+            f"target {target.name} capability probe failed: "
+            f"{result.error or result.http_status}",
+            headers,
+            target_url(target),
+        )
     )

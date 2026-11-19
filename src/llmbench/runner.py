@@ -58,6 +58,25 @@ class TargetUnavailable(RuntimeError):
     """Raised internally when a target cannot continue the run."""
 
 
+def preflight_workload(
+    config: AppConfig, tokenizer: TextTokenizer | None = None
+) -> TextTokenizer | None:
+    active_tokenizer = tokenizer if tokenizer is not None else load_tokenizer(
+        config.workload.tokenizer
+    )
+    cells = build_cells(config.workload)
+    minimum_cell = min(cells, key=lambda item: item.input_length)
+    generate_prompt(
+        config.run.seed,
+        minimum_cell,
+        -1,
+        0,
+        config.workload,
+        active_tokenizer,
+    )
+    return active_tokenizer
+
+
 class BenchmarkRunner:
     def __init__(
         self,
@@ -83,9 +102,7 @@ class BenchmarkRunner:
     async def run(self) -> RunResult:
         self.started_at = self._now()
         self.ended_at = None
-        tokenizer = self._tokenizer if self._tokenizer is not None else load_tokenizer(
-            self.config.workload.tokenizer
-        )
+        tokenizer = preflight_workload(self.config, self._tokenizer)
         cells = build_cells(self.config.workload)
         clients: dict[str, Any] = {}
         headers: dict[str, dict[str, str]] = {}
@@ -191,7 +208,7 @@ class BenchmarkRunner:
     ) -> tuple[bool, bool, bool | None, str | None]:
         mode = self.config.workload.stream_options
         if mode == "none":
-            return True, False, False, None
+            return True, False, None, None
         if mode == "include_usage":
             return True, True, None, None
 

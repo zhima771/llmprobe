@@ -11,7 +11,7 @@ from llmbench import __version__
 from llmbench.config import AppConfig, ConfigError, load_config, sanitize_url
 from llmbench.models import Cell, CellSummary, RequestResult
 from llmbench.report import print_summary, write_report
-from llmbench.runner import BenchmarkRunner
+from llmbench.runner import BenchmarkRunner, preflight_workload
 from llmbench.workload import build_cells
 
 
@@ -100,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     error_console = Console(stderr=True)
     try:
         config = load_config(args.config)
+        if args.command == "validate" or args.dry_run:
+            preflight_workload(config)
     except ConfigError as exc:
         error_console.print(f"[red]configuration error:[/red] {exc}")
         return 2
@@ -135,6 +137,20 @@ def main(argv: list[str] | None = None) -> int:
                         f"[yellow]interrupted; partial results:[/yellow] {output}"
                     )
                 return 130
+    except ConfigError as exc:
+        error_console.print(f"[red]configuration error:[/red] {exc}")
+        if runner is not None and getattr(runner, "results", None):
+            try:
+                partial = runner.partial_result()
+                output = write_report(partial, config)
+            except Exception as report_exc:  # noqa: BLE001 - preserve config exit code
+                error_console.print(
+                    "[red]partial report failed:[/red] "
+                    f"{type(report_exc).__name__}: {report_exc}"
+                )
+            else:
+                console.print(f"[yellow]partial results:[/yellow] {output}")
+        return 2
     except Exception as exc:  # noqa: BLE001 - CLI must report failures cleanly
         error_console.print(f"[red]benchmark failed:[/red] {type(exc).__name__}: {exc}")
         return 1

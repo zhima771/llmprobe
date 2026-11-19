@@ -4,10 +4,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
 import yaml
 
 from llmbench.cli import main
-from llmbench.config import load_config
+from llmbench.config import ConfigError, load_config
 from llmbench.models import RunResult, make_run_id
 from tests.mock_openai import MockOpenAIHandler, MockOpenAIServer
 
@@ -27,7 +28,13 @@ def running_server(*, reject_stream_options: bool = False) -> Iterator[MockOpenA
 
 
 def write_config(
-    tmp_path: Path, port: int, *, name: str = "e2e", base_url: str | None = None
+    tmp_path: Path,
+    port: int,
+    *,
+    name: str = "e2e",
+    base_url: str | None = None,
+    system_prompt: str = "",
+    tokenizer: str | None = None,
 ) -> Path:
     config = {
         "run": {
@@ -43,6 +50,8 @@ def write_config(
             "concurrencies": [2],
             "input_lengths": [8],
             "output_lengths": [4],
+            "system_prompt": system_prompt,
+            "tokenizer": tokenizer,
             "stream_options": "auto",
         },
         "targets": [
@@ -81,6 +90,82 @@ def test_invalid_config_returns_two(tmp_path: Path) -> None:
     path = tmp_path / "bad.yaml"
     path.write_text("targets: []\n", encoding="utf-8")
     assert main(["validate", str(path)]) == 2
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["validate"],
+        ["run", "--dry-run"],
+        ["run"],
+    ],
+)
+def test_too_long_system_prompt_returns_two_for_all_commands(
+    tmp_path: Path, command: list[str]
+) -> None:
+    config = write_config(tmp_path, 9, system_prompt="x" * 64)
+
+    assert main([command[0], str(config), *command[1:]]) == 2
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["validate"],
+        ["run", "--dry-run"],
+        ["run"],
+    ],
+)
+def test_tokenizer_load_failure_returns_two_for_all_commands(
+    tmp_path: Path, monkeypatch, capsys, command: list[str]
+) -> None:
+    config = write_config(tmp_path, 9, tokenizer="missing-tokenizer")
+
+    def fail_load(spec: str | None) -> None:
+        raise ConfigError(f"failed to load tokenizer {spec!r}")
+
+    monkeypatch.setattr("llmbench.runner.load_tokenizer", fail_load)
+
+    assert main([command[0], str(config), *command[1:]]) == 2
+    assert "tokenizer" in capsys.readouterr().err
+
+
+def test_run_phase_config_error_writes_partial_report_and_returns_two(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    config = write_config(tmp_path, 9)
+    loaded = load_config(config)
+    run_id = make_run_id(loaded.run.output_dir, loaded.run.name)
+    partial = RunResult(
+        run_id=run_id,
+        started_at="2026-11-19T00:00:00+00:00",
+        ended_at="2026-11-19T00:00:01+00:00",
+        summaries=[],
+        requests=[],
+        capabilities=[],
+        interrupted=True,
+    )
+
+    class LateConfigErrorRunner:
+        def __init__(self, config: object, progress: object) -> None:
+            self.config = config
+            self.progress = progress
+            self.results = [object()]
+
+        async def run(self) -> RunResult:
+            raise ConfigError("late tokenizer failure")
+
+        def partial_result(self) -> RunResult:
+            return partial
+
+    monkeypatch.setattr("llmbench.cli.BenchmarkRunner", LateConfigErrorRunner)
+
+    assert main(["run", str(config)]) == 2
+    run_data = json.loads(
+        (tmp_path / "results" / run_id / "run.json").read_text(encoding="utf-8")
+    )
+    assert run_data["interrupted"] is True
+    assert "late tokenizer failure" in capsys.readouterr().err
 
 
 def test_end_to_end_chat_benchmark(tmp_path: Path, capsys) -> None:
