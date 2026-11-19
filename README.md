@@ -293,3 +293,11 @@ python3 -m compileall -q src tests
 uv run llmprobe --version
 uv run llmprobe run configs/vllm-chat.yaml --dry-run
 ```
+
+## License
+
+本项目代码采用 MIT License，见根目录 `LICENSE`。
+
+`src/llmprobe/tokenizers/` 中的第三方 tokenizer 文件不适用本项目 MIT License，
+其来源、许可证和通知见 `src/llmprobe/tokenizers/manifest.json`、
+`THIRD_PARTY_NOTICES.md` 和 `licenses/`。

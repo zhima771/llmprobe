@@ -7,6 +7,7 @@ name = "llmprobe"
 version = "0.1.0"
 description = "Lightweight probe for OpenAI-compatible LLM serving performance"
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
   "h2>=4",
