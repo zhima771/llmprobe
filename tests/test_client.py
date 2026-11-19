@@ -636,6 +636,101 @@ def test_stream_request_redacts_bearer_credential_after_multiple_spaces() -> Non
     asyncio.run(scenario())
 
 
+def test_stream_request_preserves_escape_boundaries_before_fully_encoded_secret() -> None:
+    query_value = "QUERY-SECRET"
+    fully_encoded = force_percent_encode(query_value)
+    final_byte = fully_encoded[-3:]
+    request_target = target(base_url=f"http://mock/v1?api-version={query_value}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text=f"prefix=%00{fully_encoded}")
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await stream_request(
+                client,
+                request_target,
+                prompt(),
+                tokenizer=None,
+                include_usage=False,
+                request_index=0,
+                repeat=0,
+                cell=cell(),
+                client_queue_s=0.0,
+                headers={},
+                save_generated_text=False,
+            )
+        assert result.error is not None
+        assert "%00" in result.error
+        assert fully_encoded not in result.error
+        assert final_byte not in result.error
+        assert "<redacted>" in result.error
+
+    asyncio.run(scenario())
+
+
+def test_probe_usage_preserves_escape_boundaries_before_fully_encoded_secret() -> None:
+    query_value = "QUERY-SECRET"
+    fully_encoded = force_percent_encode(query_value)
+    final_byte = fully_encoded[-3:]
+    request_target = target(base_url=f"http://mock/v1?api-version={query_value}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text=f"prefix=%00{fully_encoded}")
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(TargetProbeError) as exc_info:
+                await probe_usage(
+                    client,
+                    request_target,
+                    prompt(),
+                    tokenizer=None,
+                    headers={},
+                    cell=cell(),
+                )
+        message = str(exc_info.value)
+        assert "%00" in message
+        assert fully_encoded not in message
+        assert final_byte not in message
+        assert "<redacted>" in message
+
+    asyncio.run(scenario())
+
+
+def test_stream_request_preserves_unrelated_percent_escape_before_encoded_secret() -> None:
+    query_value = "QUERY-SECRET"
+    fully_encoded = force_percent_encode(query_value)
+    final_byte = fully_encoded[-3:]
+    request_target = target(base_url=f"http://mock/v1?api-version={query_value}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text=f"benign=%7B{fully_encoded}")
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await stream_request(
+                client,
+                request_target,
+                prompt(),
+                tokenizer=None,
+                include_usage=False,
+                request_index=0,
+                repeat=0,
+                cell=cell(),
+                client_queue_s=0.0,
+                headers={},
+                save_generated_text=False,
+            )
+        assert result.error is not None
+        assert "%7B" in result.error
+        assert fully_encoded not in result.error
+        assert final_byte not in result.error
+        assert "<redacted>" in result.error
+
+    asyncio.run(scenario())
+
+
 def test_stream_request_redacts_fully_encoded_header_and_credential_variants() -> None:
     credential = "header-secret"
     full_secret = f"Bearer {credential}"

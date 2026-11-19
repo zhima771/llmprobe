@@ -61,7 +61,16 @@ def _encoded_secret_pattern(value: str) -> str:
     start = 0
     for match in _PERCENT_ESCAPE.finditer(value):
         pieces.append(re.escape(value[start : match.start()]))
-        pieces.append("%[0-9A-Fa-f]{2}")
+        hex_pair = match.group(0)[1:]
+        pieces.append(
+            "%"
+            + "".join(
+                f"[{char.upper()}{char.lower()}]"
+                if char.lower() in "abcdef"
+                else char
+                for char in hex_pair
+            )
+        )
         start = match.end()
     pieces.append(re.escape(value[start:]))
     return "".join(pieces)
