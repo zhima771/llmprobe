@@ -271,7 +271,7 @@ TTFT 包含服务端排队、prefill、首 token 调度和网络传输，这正�
 - TPOT：mean、std、p50、p90、p95、p99
 - ITL：mean、p50、p90、p95、p99
 - E2EL：mean、std、p50、p90、p95、p99
-- 平均/中位实际输入和输出 token 数
+- 平均实际输入和输出 token 数
 - decode tokens/s per stream = `1000 / mean_tpot_ms`（存在 TPOT 时）
 - peak concurrent requests
 - token count source 分布：`usage` / `tokenizer` / `events`
@@ -307,8 +307,7 @@ results/<run_id>/
 - `run_id`、开始/结束时间、工具版本
 - 完整有效配置（密钥和敏感 header 已脱敏）
 - target 能力探测结果（如是否支持 stream usage）
-- 每个 cell/repeat 的聚合指标
-- 全局错误统计
+- `interrupted` 中断状态
 
 ### `requests.jsonl`
 
@@ -332,16 +331,15 @@ results/<run_id>/
 
 ### `summary.md`
 
-按 target 分区的人类可读表格。多 target 时每个 cell 并排展示以下核心指标：
+人类可读的汇总表格，每行对应一个 target/cell/repeat，包含以下核心指标：
 
 - completed / failed
 - request throughput
 - output token throughput
-- TTFT p50 / p95 / p99
-- TPOT p50 / p95
+- TTFT p50 / p95
+- TPOT p50
 - ITL p95
-- E2EL p50 / p95
-- actual input/output tokens
+- E2EL p95
 
 终端只打印精简表格，完整分位数和数据写入文件。
 

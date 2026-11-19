@@ -1,0 +1,29 @@
+run:
+  name: vllm-local
+  seed: 42
+  output_dir: results
+  repeats: 1
+  cooldown_s: 2
+  save_generated_text: false
+  save_itl: false
+
+workload:
+  dataset: random
+  requests_per_cell: 60
+  warmup_requests: 3
+  concurrencies: [1, 2, 4, 8]
+  input_lengths: [128, 1024]
+  output_lengths: [128]
+  system_prompt: ""
+  stream_options: auto
+
+targets:
+  - name: vllm-qwen
+    backend: openai-chat
+    base_url: http://127.0.0.1:8000/v1
+    model: Qwen/Qwen3-8B
+    timeout_s: 300
+    max_tokens_field: max_tokens
+    request_params:
+      temperature: 0
+      ignore_eos: true
