@@ -13,7 +13,7 @@ from llmbench.client import (
     stream_request,
 )
 from llmbench.config import TargetConfig
-from llmbench.models import Cell, GeneratedPrompt
+from llmbench.models import Cell, GeneratedPrompt, RequestResult
 
 
 class ChunkStream(httpx.AsyncByteStream):
@@ -183,6 +183,7 @@ def test_stream_request_falls_back_to_event_count_without_usage() -> None:
         assert result.output_tokens == 3
         assert result.output_tokens_source == "events"
         assert result.output_tokens_estimated is True
+        assert result.generated_text is None
 
     asyncio.run(scenario())
 
@@ -535,3 +536,166 @@ def test_stream_end_includes_response_close_time() -> None:
         assert result.stream_end_s >= result.e2el_s + 0.02
 
     asyncio.run(scenario())
+
+
+def test_build_payload_ignores_managed_chat_request_params() -> None:
+    payload = build_payload(
+        target(
+            request_params={
+                "temperature": 0.25,
+                "stream": False,
+                "stream_options": {"include_usage": True},
+                "model": "bypassed-model",
+                "messages": [{"role": "user", "content": "bypassed"}],
+                "max_tokens": 999,
+                "max_completion_tokens": 999,
+            }
+        ),
+        prompt(),
+        output_length=12,
+        include_usage=False,
+    )
+
+    assert payload["stream"] is True
+    assert "stream_options" not in payload
+    assert payload["model"] == "mock-model"
+    assert payload["messages"] == [{"role": "user", "content": "hello"}]
+    assert payload["max_tokens"] == 12
+    assert "max_completion_tokens" not in payload
+    assert payload["temperature"] == 0.25
+
+
+def test_build_payload_ignores_managed_completion_request_params() -> None:
+    payload = build_payload(
+        target(
+            backend="openai-completions",
+            request_params={
+                "stream": False,
+                "stream_options": {"include_usage": False},
+                "model": "bypassed-model",
+                "messages": [{"role": "user", "content": "bypassed"}],
+                "prompt": "bypassed prompt",
+                "max_tokens": 999,
+                "max_completion_tokens": 999,
+            },
+        ),
+        prompt(),
+        output_length=12,
+        include_usage=True,
+    )
+
+    assert payload["stream"] is True
+    assert payload["stream_options"] == {"include_usage": True}
+    assert payload["model"] == "mock-model"
+    assert payload["prompt"] == "hello"
+    assert "messages" not in payload
+    assert payload["max_tokens"] == 12
+    assert "max_completion_tokens" not in payload
+
+
+def run_chat_delta(
+    delta: dict[str, object], *, save_generated_text: bool = False
+) -> RequestResult:
+    def handler(request: httpx.Request) -> httpx.Response:
+        chunks = [
+            sse(
+                {
+                    "choices": [
+                        {
+                            "delta": delta,
+                            "finish_reason": "tool_calls",
+                        }
+                    ]
+                }
+            )
+        ]
+        return httpx.Response(200, stream=ChunkStream(chunks))
+
+    async def scenario() -> RequestResult:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await stream_request(
+                client,
+                target(),
+                prompt(),
+                tokenizer=None,
+                include_usage=False,
+                request_index=0,
+                repeat=0,
+                cell=cell(),
+                client_queue_s=0.0,
+                headers={},
+                save_generated_text=save_generated_text,
+            )
+
+    return asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "delta",
+    [
+        {"tool_calls": [{}]},
+        {"tool_calls": [{"index": 0}]},
+        {"tool_calls": [{"function": {"name": "", "arguments": ""}}]},
+        {"function_call": {"name": ""}},
+        {"function_call": {"arguments": ""}},
+    ],
+)
+def test_metadata_only_tool_deltas_are_not_token_events(delta: dict[str, object]) -> None:
+    result = run_chat_delta(delta)
+
+    assert result.success is False
+    assert result.token_event_count == 0
+    assert result.output_tokens == 0
+    assert result.output_tokens_source == "unavailable"
+    assert result.error_kind == "no_tokens"
+
+
+@pytest.mark.parametrize(
+    "delta",
+    [
+        {"tool_calls": [{"id": "call_1"}]},
+        {"tool_calls": [{"type": "function"}]},
+        {"tool_calls": [{"function": {"name": "lookup"}}]},
+        {"tool_calls": [{"function": {"arguments": "{}"}}]},
+    ],
+)
+def test_meaningful_tool_metadata_counts_as_a_token_event(delta: dict[str, object]) -> None:
+    result = run_chat_delta(delta)
+
+    assert result.success is True
+    assert result.token_event_count == 1
+    assert result.output_tokens == 1
+    assert result.output_tokens_source == "events"
+    assert result.generated_text is None
+
+
+@pytest.mark.parametrize(
+    "delta",
+    [
+        {"function_call": {"name": "lookup"}},
+        {"function_call": {"arguments": "{}"}},
+    ],
+)
+def test_function_call_content_is_token_bearing(delta: dict[str, object]) -> None:
+    result = run_chat_delta(delta)
+
+    assert result.success is True
+    assert result.token_event_count == 1
+    assert result.generated_text is None
+
+
+def test_reasoning_field_is_token_bearing_without_generated_text() -> None:
+    result = run_chat_delta({"reasoning": "internal thought"})
+
+    assert result.success is True
+    assert result.token_event_count == 1
+    assert result.output_tokens == 1
+    assert result.generated_text is None
+
+
+def test_visible_text_is_not_retained_when_generated_text_is_disabled() -> None:
+    result = run_chat_delta({"content": "visible answer"}, save_generated_text=False)
+
+    assert result.success is True
+    assert result.token_event_count == 1
+    assert result.generated_text is None

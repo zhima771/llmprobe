@@ -18,6 +18,19 @@ class TargetProbeError(RuntimeError):
     """Raised when a target cannot execute a stream-options capability probe."""
 
 
+_MANAGED_PAYLOAD_KEYS = frozenset(
+    {
+        "model",
+        "messages",
+        "prompt",
+        "stream",
+        "stream_options",
+        "max_tokens",
+        "max_completion_tokens",
+    }
+)
+
+
 def _redact_secrets(text: str, headers: Mapping[str, str]) -> str:
     secrets: set[str] = set()
     for value in headers.values():
@@ -70,9 +83,14 @@ def build_payload(
             "stream": True,
             target.max_tokens_field: output_length,
         }
-    payload.update(target.request_params)
+    for key, value in target.request_params.items():
+        if key not in _MANAGED_PAYLOAD_KEYS:
+            payload[key] = value
+    payload["stream"] = True
     if include_usage:
         payload["stream_options"] = {"include_usage": True}
+    else:
+        payload.pop("stream_options", None)
     return payload
 
 
@@ -89,6 +107,31 @@ def _extract_usage(data: dict[str, Any]) -> tuple[int | None, int | None]:
         else None
     )
     return prompt_value, completion_value
+
+
+def _nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
+def _tool_call_has_content(call: Any) -> bool:
+    if not isinstance(call, dict):
+        return False
+    if _nonempty_string(call.get("id")) or _nonempty_string(call.get("type")):
+        return True
+    function = call.get("function")
+    if not isinstance(function, dict):
+        return False
+    return _nonempty_string(function.get("name")) or _nonempty_string(
+        function.get("arguments")
+    )
+
+
+def _function_call_has_content(function_call: Any) -> bool:
+    if not isinstance(function_call, dict):
+        return False
+    return _nonempty_string(function_call.get("name")) or _nonempty_string(
+        function_call.get("arguments")
+    )
 
 
 def _extract_chat_token(data: dict[str, Any]) -> tuple[bool, str, str, str | None]:
@@ -111,10 +154,14 @@ def _extract_chat_token(data: dict[str, Any]) -> tuple[bool, str, str, str | Non
             if key == "content":
                 displayed_parts.append(value)
     tool_calls = delta.get("tool_calls")
-    if isinstance(tool_calls, list) and tool_calls:
-        counted_parts.append(json.dumps(tool_calls, ensure_ascii=False, sort_keys=True))
+    if isinstance(tool_calls, list):
+        meaningful_calls = [call for call in tool_calls if _tool_call_has_content(call)]
+        if meaningful_calls:
+            counted_parts.append(
+                json.dumps(meaningful_calls, ensure_ascii=False, sort_keys=True)
+            )
     function_call = delta.get("function_call")
-    if isinstance(function_call, dict) and function_call:
+    if _function_call_has_content(function_call):
         counted_parts.append(json.dumps(function_call, ensure_ascii=False, sort_keys=True))
     if not counted_parts:
         return False, "", "", finish_reason
@@ -185,6 +232,7 @@ async def stream_request(
             usage_input = prompt_tokens
         if completion_tokens is not None:
             usage_output = completion_tokens
+            counted_parts.clear()
         token_bearing, counted_text, displayed_text, reason = _extract_token(
             target.backend, data
         )
@@ -199,8 +247,10 @@ async def stream_request(
             itl_s.append(now - (last_token_at if last_token_at is not None else now))
         last_token_at = now
         token_events += 1
-        counted_parts.append(counted_text)
-        visible_parts.append(displayed_text)
+        if tokenizer is not None and usage_output is None:
+            counted_parts.append(counted_text)
+        if save_generated_text:
+            visible_parts.append(displayed_text)
 
     try:
         async with asyncio.timeout(target.timeout_s):
