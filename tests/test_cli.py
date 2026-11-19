@@ -26,7 +26,9 @@ def running_server(*, reject_stream_options: bool = False) -> Iterator[MockOpenA
         thread.join(timeout=2)
 
 
-def write_config(tmp_path: Path, port: int, *, name: str = "e2e") -> Path:
+def write_config(
+    tmp_path: Path, port: int, *, name: str = "e2e", base_url: str | None = None
+) -> Path:
     config = {
         "run": {
             "name": name,
@@ -47,7 +49,7 @@ def write_config(tmp_path: Path, port: int, *, name: str = "e2e") -> Path:
             {
                 "name": "mock",
                 "backend": "openai-chat",
-                "base_url": f"http://127.0.0.1:{port}/v1",
+                "base_url": base_url or f"http://127.0.0.1:{port}/v1",
                 "model": "mock-model",
             }
         ],
@@ -60,6 +62,19 @@ def write_config(tmp_path: Path, port: int, *, name: str = "e2e") -> Path:
 def test_dry_run_does_not_need_a_server(tmp_path: Path) -> None:
     config = write_config(tmp_path, 9)
     assert main(["run", str(config), "--dry-run"]) == 0
+
+
+def test_dry_run_masks_base_url_query_values(tmp_path: Path, capsys) -> None:
+    config = write_config(
+        tmp_path,
+        9,
+        base_url="http://127.0.0.1:9/v1?api-version=query-secret&mode=bench",
+    )
+    assert main(["run", str(config), "--dry-run"]) == 0
+    rendered = "".join(capsys.readouterr().out.split())
+    assert "api-version=%3Credacted%3E" in rendered
+    assert "mode=%3Credacted%3E" in rendered
+    assert "query-secret" not in rendered
 
 
 def test_invalid_config_returns_two(tmp_path: Path) -> None:
@@ -187,3 +202,107 @@ def test_keyboard_interrupt_writes_partial_report_and_returns_130(
         (tmp_path / "results" / run_id / "run.json").read_text(encoding="utf-8")
     )
     assert run_data["interrupted"] is True
+
+
+def test_report_write_failure_returns_one(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    config = write_config(tmp_path, 9)
+    loaded = load_config(config)
+    result = RunResult(
+        run_id=make_run_id(loaded.run.output_dir, loaded.run.name),
+        started_at="2026-11-19T00:00:00+00:00",
+        ended_at="2026-11-19T00:00:01+00:00",
+        summaries=[],
+        requests=[],
+        capabilities=[],
+    )
+
+    class CompletedRunner:
+        def __init__(self, config: object, progress: object) -> None:
+            self.config = config
+            self.progress = progress
+
+        async def run(self) -> RunResult:
+            return result
+
+    def fail_write(result: RunResult, config: object) -> Path:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("llmbench.cli.BenchmarkRunner", CompletedRunner)
+    monkeypatch.setattr("llmbench.cli.write_report", fail_write)
+    assert main(["run", str(config)]) == 1
+    stderr = capsys.readouterr().err
+    assert "report failed" in stderr
+    assert "disk full" in stderr
+
+
+def test_print_summary_failure_returns_one(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    config = write_config(tmp_path, 9)
+    loaded = load_config(config)
+    result = RunResult(
+        run_id=make_run_id(loaded.run.output_dir, loaded.run.name),
+        started_at="2026-11-19T00:00:00+00:00",
+        ended_at="2026-11-19T00:00:01+00:00",
+        summaries=[],
+        requests=[],
+        capabilities=[],
+    )
+
+    class CompletedRunner:
+        def __init__(self, config: object, progress: object) -> None:
+            self.config = config
+            self.progress = progress
+
+        async def run(self) -> RunResult:
+            return result
+
+    def fail_summary(result: RunResult, console: object) -> None:
+        raise RuntimeError("render failed")
+
+    monkeypatch.setattr("llmbench.cli.BenchmarkRunner", CompletedRunner)
+    monkeypatch.setattr(
+        "llmbench.cli.write_report", lambda result, config: tmp_path / "report"
+    )
+    monkeypatch.setattr("llmbench.cli.print_summary", fail_summary)
+    assert main(["run", str(config)]) == 1
+    assert "report failed" in capsys.readouterr().err
+
+
+def test_interrupt_with_report_write_failure_still_returns_130(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    config = write_config(tmp_path, 9)
+    loaded = load_config(config)
+    partial = RunResult(
+        run_id=make_run_id(loaded.run.output_dir, loaded.run.name),
+        started_at="2026-11-19T00:00:00+00:00",
+        ended_at="2026-11-19T00:00:01+00:00",
+        summaries=[],
+        requests=[],
+        capabilities=[],
+        interrupted=True,
+    )
+
+    class InterruptedRunner:
+        def __init__(self, config: object, progress: object) -> None:
+            self.config = config
+            self.progress = progress
+
+        async def run(self) -> RunResult:
+            raise KeyboardInterrupt
+
+        def partial_result(self) -> RunResult:
+            return partial
+
+    def fail_write(result: RunResult, config: object) -> Path:
+        raise OSError("partial disk full")
+
+    monkeypatch.setattr("llmbench.cli.BenchmarkRunner", InterruptedRunner)
+    monkeypatch.setattr("llmbench.cli.write_report", fail_write)
+    assert main(["run", str(config)]) == 130
+    stderr = capsys.readouterr().err
+    assert "partial report failed" in stderr
+    assert "partial disk full" in stderr

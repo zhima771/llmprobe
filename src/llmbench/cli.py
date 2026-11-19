@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from llmbench import __version__
-from llmbench.config import AppConfig, ConfigError, load_config
+from llmbench.config import AppConfig, ConfigError, load_config, sanitize_url
 from llmbench.models import Cell, CellSummary, RequestResult
 from llmbench.report import print_summary, write_report
 from llmbench.runner import BenchmarkRunner
@@ -88,7 +88,10 @@ def _print_plan(config: AppConfig, console: Console) -> None:
     console.print(f"formal requests: {_formal_total(config)}")
     console.print(f"warmup requests: {warmups}")
     for target in config.targets:
-        console.print(f"  - {target.name}: {target.backend} {target.base_url} model={target.model}")
+        console.print(
+            f"  - {target.name}: {target.backend} {sanitize_url(target.base_url)} "
+            f"model={target.model}"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -120,15 +123,27 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 result = asyncio.run(runner.run())
             except KeyboardInterrupt:
-                result = runner.partial_result()
-                output = write_report(result, config)
-                console.print(f"[yellow]interrupted; partial results:[/yellow] {output}")
+                try:
+                    result = runner.partial_result()
+                    output = write_report(result, config)
+                except Exception as exc:  # noqa: BLE001 - preserve interrupt exit code
+                    error_console.print(
+                        f"[red]partial report failed:[/red] {type(exc).__name__}: {exc}"
+                    )
+                else:
+                    console.print(
+                        f"[yellow]interrupted; partial results:[/yellow] {output}"
+                    )
                 return 130
     except Exception as exc:  # noqa: BLE001 - CLI must report failures cleanly
         error_console.print(f"[red]benchmark failed:[/red] {type(exc).__name__}: {exc}")
         return 1
 
-    output = write_report(result, config)
-    print_summary(result, console)
+    try:
+        output = write_report(result, config)
+        print_summary(result, console)
+    except Exception as exc:  # noqa: BLE001 - reporting failures must be controlled
+        error_console.print(f"[red]report failed:[/red] {type(exc).__name__}: {exc}")
+        return 1
     console.print(f"results: {output}")
     return 0 if any(item.success for item in result.requests) else 1

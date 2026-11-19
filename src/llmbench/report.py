@@ -14,7 +14,7 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
-from llmbench.config import AppConfig
+from llmbench.config import AppConfig, sanitize_url
 from llmbench.models import CellSummary, RequestResult, RunResult
 
 _REDACTED = "<redacted>"
@@ -191,7 +191,13 @@ def _redact(value: Any) -> Any:
 
 
 def config_to_dict(config: AppConfig) -> dict[str, Any]:
-    return _redact(_jsonable(config))
+    data = _redact(_jsonable(config))
+    targets = data.get("targets")
+    if isinstance(targets, list):
+        for target in targets:
+            if isinstance(target, dict) and isinstance(target.get("base_url"), str):
+                target["base_url"] = sanitize_url(target["base_url"])
+    return data
 
 
 def request_to_dict(

@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 from rich.console import Console
 
 from llmbench.config import AppConfig, RunConfig, TargetConfig, WorkloadConfig
@@ -504,3 +505,62 @@ def test_print_summary_renders_the_run_table() -> None:
     assert "llmbench results: 20260101T000000Z-report-test" in rendered
     assert "mock" in rendered
     assert "i8-o2-c1" in rendered
+
+
+def test_config_serialization_sanitizes_base_url_credentials_and_query(
+    tmp_path: Path,
+) -> None:
+    config = replace(
+        make_config(tmp_path),
+        targets=(
+            replace(
+                make_config(tmp_path).targets[0],
+                base_url=(
+                    "https://alice:url-secret@mock.example/v1"
+                    "?api-version=query-secret&mode=bench"
+                ),
+            ),
+        ),
+    )
+
+    target = config_to_dict(config)["targets"][0]
+    sanitized = target["base_url"]
+
+    assert sanitized.startswith("https://mock.example/v1?")
+    assert "alice" not in sanitized
+    assert "url-secret" not in sanitized
+    assert "query-secret" not in sanitized
+    assert "api-version=%3Credacted%3E" in sanitized
+    assert "mode=%3Credacted%3E" in sanitized
+
+
+def test_report_files_persist_sanitized_base_url_only(tmp_path: Path) -> None:
+    config = replace(
+        make_config(tmp_path),
+        targets=(
+            replace(
+                make_config(tmp_path).targets[0],
+                base_url=(
+                    "https://alice:url-secret@mock.example/v1"
+                    "?api-version=query-secret&mode=bench"
+                ),
+            ),
+        ),
+    )
+    item = make_result()
+    output = write_report(make_run([make_summary(item)], [item]), config)
+
+    config_payload = yaml.safe_load(
+        (output / "config.effective.yaml").read_text(encoding="utf-8")
+    )
+    run_payload = json.loads((output / "run.json").read_text(encoding="utf-8"))
+    for base_url in (
+        config_payload["targets"][0]["base_url"],
+        run_payload["config"]["targets"][0]["base_url"],
+    ):
+        assert base_url.startswith("https://mock.example/v1?")
+        assert "api-version=%3Credacted%3E" in base_url
+        assert "mode=%3Credacted%3E" in base_url
+        assert "alice" not in base_url
+        assert "url-secret" not in base_url
+        assert "query-secret" not in base_url

@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 
@@ -6,6 +7,7 @@ from llmbench.config import (
     ConfigError,
     load_config,
     resolve_headers,
+    sanitize_url,
     target_url,
 )
 
@@ -164,3 +166,66 @@ def test_huge_negative_integer_is_a_config_error(tmp_path: Path) -> None:
     )
     with pytest.raises(ConfigError, match="finite"):
         load_config(write_config(tmp_path, text), environ={})
+
+
+def test_target_url_preserves_query_when_appending_endpoint(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "base_url: http://127.0.0.1:8000/v1",
+        "base_url: http://127.0.0.1:8000/v1?api-version=2024-01-01",
+    )
+    config = load_config(write_config(tmp_path, text), environ={})
+    assert (
+        target_url(config.targets[0])
+        == "http://127.0.0.1:8000/v1/chat/completions?api-version=2024-01-01"
+    )
+
+
+def test_base_url_userinfo_is_rejected_without_echoing_credentials(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "base_url: http://127.0.0.1:8000/v1",
+        "base_url: http://alice:super-secret@127.0.0.1:8000/v1",
+    )
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(write_config(tmp_path, text), environ={})
+    message = str(exc_info.value)
+    assert "username or password" in message
+    assert "alice" not in message
+    assert "super-secret" not in message
+
+
+def test_sanitize_url_removes_userinfo_and_masks_query_values() -> None:
+    sanitized = sanitize_url(
+        "https://alice:super-secret@example.com:8443/v1"
+        "?api-version=query-secret&empty=&flag#fragment"
+    )
+
+    parsed = urlsplit(sanitized)
+    assert parsed.scheme == "https"
+    assert parsed.hostname == "example.com"
+    assert parsed.port == 8443
+    assert parsed.username is None
+    assert parsed.password is None
+    assert parsed.path == "/v1"
+    assert parsed.fragment == ""
+    assert parse_qsl(parsed.query, keep_blank_values=True) == [
+        ("api-version", "<redacted>"),
+        ("empty", "<redacted>"),
+        ("flag", "<redacted>"),
+    ]
+    assert "alice" not in sanitized
+    assert "super-secret" not in sanitized
+    assert "query-secret" not in sanitized
+    assert "fragment" not in sanitized
+
+
+def test_target_url_preserves_query_value_with_trailing_slash(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "base_url: http://127.0.0.1:8000/v1",
+        "base_url: http://127.0.0.1:8000/v1?api-version=2024-01-01&route=/v1/",
+    )
+    config = load_config(write_config(tmp_path, text), environ={})
+    assert (
+        target_url(config.targets[0])
+        == "http://127.0.0.1:8000/v1/chat/completions"
+        "?api-version=2024-01-01&route=/v1/"
+    )

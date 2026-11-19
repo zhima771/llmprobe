@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import yaml
 
@@ -24,6 +24,7 @@ _RESERVED_REQUEST_KEYS = {
 _BACKENDS = {"openai-chat", "openai-completions"}
 _STREAM_OPTIONS = {"auto", "include_usage", "none"}
 _MAX_TOKEN_FIELDS = {"max_tokens", "max_completion_tokens"}
+_SANITIZED_QUERY_VALUE = "<redacted>"
 
 
 class ConfigError(ValueError):
@@ -232,10 +233,12 @@ def _parse_target(raw: Any, index: int) -> TargetConfig:
         raise ConfigError(
             f"{path}.max_tokens_field must be max_tokens or max_completion_tokens"
         )
-    base_url = _string(data.get("base_url"), f"{path}.base_url").rstrip("/")
+    base_url = _string(data.get("base_url"), f"{path}.base_url")
     parsed = urlsplit(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ConfigError(f"{path}.base_url must be an absolute http(s) URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise ConfigError(f"{path}.base_url must not include username or password")
     api_key_env = data.get("api_key_env")
     if api_key_env is not None:
         api_key_env = _string(api_key_env, f"{path}.api_key_env")
@@ -342,6 +345,18 @@ def validate_environment(
         resolve_headers(target, env)
 
 
+def sanitize_url(url: str) -> str:
+    parsed = urlsplit(url)
+    netloc = parsed.netloc.rsplit("@", 1)[-1]
+    query = parsed.query
+    if query:
+        pairs = parse_qsl(query, keep_blank_values=True)
+        query = urlencode([(key, _SANITIZED_QUERY_VALUE) for key, _ in pairs])
+    return urlunsplit((parsed.scheme, netloc, parsed.path, query, ""))
+
+
 def target_url(target: TargetConfig) -> str:
     endpoint = "chat/completions" if target.backend == "openai-chat" else "completions"
-    return f"{target.base_url.rstrip('/')}/{endpoint}"
+    parsed = urlsplit(target.base_url)
+    path = f"{parsed.path.rstrip('/')}/{endpoint}"
+    return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, ""))
