@@ -635,6 +635,8 @@ def run_chat_delta(
     [
         {"tool_calls": [{}]},
         {"tool_calls": [{"index": 0}]},
+        {"tool_calls": [{"id": "call_1"}]},
+        {"tool_calls": [{"type": "function"}]},
         {"tool_calls": [{"function": {"name": "", "arguments": ""}}]},
         {"function_call": {"name": ""}},
         {"function_call": {"arguments": ""}},
@@ -653,13 +655,13 @@ def test_metadata_only_tool_deltas_are_not_token_events(delta: dict[str, object]
 @pytest.mark.parametrize(
     "delta",
     [
-        {"tool_calls": [{"id": "call_1"}]},
-        {"tool_calls": [{"type": "function"}]},
         {"tool_calls": [{"function": {"name": "lookup"}}]},
         {"tool_calls": [{"function": {"arguments": "{}"}}]},
     ],
 )
-def test_meaningful_tool_metadata_counts_as_a_token_event(delta: dict[str, object]) -> None:
+def test_meaningful_tool_call_content_counts_as_a_token_event(
+    delta: dict[str, object],
+) -> None:
     result = run_chat_delta(delta)
 
     assert result.success is True

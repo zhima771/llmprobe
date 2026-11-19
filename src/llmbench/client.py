@@ -116,8 +116,6 @@ def _nonempty_string(value: Any) -> bool:
 def _tool_call_has_content(call: Any) -> bool:
     if not isinstance(call, dict):
         return False
-    if _nonempty_string(call.get("id")) or _nonempty_string(call.get("type")):
-        return True
     function = call.get("function")
     if not isinstance(function, dict):
         return False
