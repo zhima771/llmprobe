@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import time
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -45,18 +47,33 @@ def _redact_secrets(text: str, headers: Mapping[str, str]) -> str:
     return text
 
 
+def _is_loopback_url(url: str) -> bool:
+    hostname = urlsplit(url).hostname
+    if not hostname:
+        return False
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
 def create_http_client(target: TargetConfig, max_connections: int) -> httpx.AsyncClient:
     verify: bool | str = target.ca_bundle if target.ca_bundle else target.verify_tls
     limits = httpx.Limits(
         max_connections=max_connections,
         max_keepalive_connections=max_connections,
     )
-    return httpx.AsyncClient(
-        http2=target.http2,
-        verify=verify,
-        limits=limits,
-        timeout=httpx.Timeout(target.timeout_s),
-    )
+    options: dict[str, Any] = {
+        "http2": target.http2,
+        "verify": verify,
+        "limits": limits,
+        "timeout": httpx.Timeout(target.timeout_s),
+    }
+    if _is_loopback_url(target.base_url):
+        options["trust_env"] = False
+    return httpx.AsyncClient(**options)
 
 
 def build_payload(

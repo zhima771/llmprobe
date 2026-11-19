@@ -701,3 +701,23 @@ def test_visible_text_is_not_retained_when_generated_text_is_disabled() -> None:
     assert result.success is True
     assert result.token_event_count == 1
     assert result.generated_text is None
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://127.0.0.1:8000/v1", "http://localhost:8000/v1", "http://[::1]:8000/v1"],
+)
+def test_create_http_client_bypasses_environment_proxies_for_loopback(
+    base_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    create_http_client(target(base_url=base_url), max_connections=1)
+
+    assert captured["trust_env"] is False

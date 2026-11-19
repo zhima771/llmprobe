@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+import argparse
+import asyncio
+from typing import Self
+
+from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+
+from llmbench import __version__
+from llmbench.config import AppConfig, ConfigError, load_config
+from llmbench.models import Cell, CellSummary, RequestResult
+from llmbench.report import print_summary, write_report
+from llmbench.runner import BenchmarkRunner
+from llmbench.workload import build_cells
+
+
+class RichProgressSink:
+    def __init__(self, console: Console, total_requests: int) -> None:
+        self.console = console
+        self.progress = Progress(
+            SpinnerColumn(),
+            TextColumn("{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            console=console,
+            transient=True,
+        )
+        self.task_id = self.progress.add_task("starting", total=total_requests)
+
+    def __enter__(self) -> Self:
+        self.progress.start()
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.progress.stop()
+
+    def cell_started(self, target: str, cell: Cell, repeat: int) -> None:
+        self.progress.update(
+            self.task_id,
+            description=f"{target} {cell.id} repeat={repeat} c={cell.concurrency}",
+        )
+
+    def request_finished(self, result: RequestResult) -> None:
+        self.progress.advance(self.task_id)
+
+    def cell_finished(self, summary: CellSummary) -> None:
+        self.console.print(
+            f"[cyan]{summary.target}[/cyan] {summary.cell_id} r={summary.repeat}: "
+            f"{summary.completed} ok / {summary.failed} failed, "
+            f"{summary.request_throughput:.2f} req/s, "
+            f"{summary.output_token_throughput or 0:.2f} out tok/s"
+        )
+
+    def warning(self, message: str) -> None:
+        self.console.print(f"[yellow]warning:[/yellow] {message}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="llmbench", description=__doc__)
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    run_parser = subparsers.add_parser("run", help="execute a benchmark config")
+    run_parser.add_argument("config", help="path to YAML config")
+    run_parser.add_argument("--dry-run", action="store_true", help="show matrix and exit")
+
+    validate_parser = subparsers.add_parser("validate", help="validate a benchmark config")
+    validate_parser.add_argument("config", help="path to YAML config")
+    return parser
+
+
+def _formal_total(config: AppConfig) -> int:
+    cells = build_cells(config.workload)
+    return (
+        len(cells)
+        * len(config.targets)
+        * config.run.repeats
+        * config.workload.requests_per_cell
+    )
+
+
+def _print_plan(config: AppConfig, console: Console) -> None:
+    cells = build_cells(config.workload)
+    warmups = len(cells) * len(config.targets) * config.workload.warmup_requests
+    console.print(f"targets: {', '.join(target.name for target in config.targets)}")
+    console.print(f"cells: {len(cells)}")
+    console.print(f"formal requests: {_formal_total(config)}")
+    console.print(f"warmup requests: {warmups}")
+    for target in config.targets:
+        console.print(f"  - {target.name}: {target.backend} {target.base_url} model={target.model}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(list(argv) if argv is not None else None)
+    console = Console()
+    error_console = Console(stderr=True)
+    try:
+        config = load_config(args.config)
+    except ConfigError as exc:
+        error_console.print(f"[red]configuration error:[/red] {exc}")
+        return 2
+
+    if args.command == "validate":
+        console.print(
+            f"configuration valid: {len(config.targets)} targets, "
+            f"{_formal_total(config)} formal requests"
+        )
+        return 0
+
+    if args.dry_run:
+        _print_plan(config, console)
+        return 0
+
+    total = _formal_total(config)
+    runner: BenchmarkRunner | None = None
+    try:
+        with RichProgressSink(console, total) as progress:
+            runner = BenchmarkRunner(config, progress=progress)
+            try:
+                result = asyncio.run(runner.run())
+            except KeyboardInterrupt:
+                result = runner.partial_result()
+                output = write_report(result, config)
+                console.print(f"[yellow]interrupted; partial results:[/yellow] {output}")
+                return 130
+    except Exception as exc:  # noqa: BLE001 - CLI must report failures cleanly
+        error_console.print(f"[red]benchmark failed:[/red] {type(exc).__name__}: {exc}")
+        return 1
+
+    output = write_report(result, config)
+    print_summary(result, console)
+    console.print(f"results: {output}")
+    return 0 if any(item.success for item in result.requests) else 1
