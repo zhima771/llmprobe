@@ -457,6 +457,7 @@ def test_summary_markdown_escapes_table_delimiters_and_line_breaks(tmp_path: Pat
     markdown = (output / "summary.md").read_text(encoding="utf-8")
 
     assert "| a\\|b | cell\\r\\nid |" in markdown
+    assert "| TTFT avg/p95 | TPOT avg/p95 | ITL avg/p95 | E2EL avg/p95 |" in markdown
     assert "\r" not in markdown
 
 
@@ -555,13 +556,19 @@ def test_print_summary_renders_the_run_table() -> None:
     run = make_run([make_summary(item)], [item])
     stream = io.StringIO()
 
-    print_summary(run, Console(file=stream, force_terminal=False, width=160))
+    print_summary(run, Console(file=stream, force_terminal=False, width=240))
 
     rendered = stream.getvalue()
     assert "llmbench results: 20260101T000000Z-report-test" in rendered
     assert "mock" in rendered
     assert "i8-o2-c1" in rendered
     assert "Decode tok/s" in rendered
+    assert "TTFT avg/p95" in rendered
+    assert "TPOT avg/p95" in rendered
+    assert "ITL avg/p95" in rendered
+    assert "E2EL avg/p95" in rendered
+    assert "10.00 / 10.00 ms" in rendered
+    assert "20.00 / 20.00 ms" in rendered
     assert "100.00" in rendered
 
 

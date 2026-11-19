@@ -352,6 +352,10 @@ def _format_number(value: float | None, digits: int = 2) -> str:
     return "-" if value is None else f"{value:.{digits}f}"
 
 
+def _avg_p95(mean_ms: float | None, p95_ms: float | None) -> str:
+    return f"{_format_number(mean_ms)} / {_format_number(p95_ms)} ms"
+
+
 def _escape_line_breaks(value: str) -> str:
     return value.replace("\r", "\\r").replace("\n", "\\n")
 
@@ -370,28 +374,22 @@ def _markdown(result: RunResult) -> str:
         "",
         (
             "| Target | Cell | Repeat | OK/Err | Req/s | Out tok/s | Decode tok/s | "
-            "TTFT p50 | TTFT p95 | TPOT p50 | ITL p95 | E2EL p95 |"
+            "TTFT avg/p95 | TPOT avg/p95 | ITL avg/p95 | E2EL avg/p95 |"
         ),
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for summary in result.summaries:
         lines.append(
-            "| {target} | {cell} | {repeat} | {ok}/{failed} | {rps} | {out_tps} | "
-            "{decode_tps} | {ttft50} | {ttft95} | {tpot50} | {itl95} | {e2el95} |".format(
-                target=_escape_table_cell(summary.target),
-                cell=_escape_table_cell(summary.cell_id),
-                repeat=summary.repeat,
-                ok=summary.completed,
-                failed=summary.failed,
-                rps=_format_number(summary.request_throughput),
-                out_tps=_format_number(summary.output_token_throughput),
-                decode_tps=_format_number(summary.decode_tokens_per_s),
-                ttft50=_format_number(summary.ttft.p50_ms) + " ms",
-                ttft95=_format_number(summary.ttft.p95_ms) + " ms",
-                tpot50=_format_number(summary.tpot.p50_ms) + " ms",
-                itl95=_format_number(summary.itl.p95_ms) + " ms",
-                e2el95=_format_number(summary.e2el.p95_ms) + " ms",
-            )
+            f"| {_escape_table_cell(summary.target)} | "
+            f"{_escape_table_cell(summary.cell_id)} | {summary.repeat} | "
+            f"{summary.completed}/{summary.failed} | "
+            f"{_format_number(summary.request_throughput)} | "
+            f"{_format_number(summary.output_token_throughput)} | "
+            f"{_format_number(summary.decode_tokens_per_s)} | "
+            f"{_avg_p95(summary.ttft.mean_ms, summary.ttft.p95_ms)} | "
+            f"{_avg_p95(summary.tpot.mean_ms, summary.tpot.p95_ms)} | "
+            f"{_avg_p95(summary.itl.mean_ms, summary.itl.p95_ms)} | "
+            f"{_avg_p95(summary.e2el.mean_ms, summary.e2el.p95_ms)} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -480,10 +478,10 @@ def print_summary(result: RunResult, console: Console | None = None) -> None:
         "Req/s",
         "Out tok/s",
         "Decode tok/s",
-        "TTFT p50",
-        "TTFT p95",
-        "TPOT p50",
-        "E2EL p95",
+        "TTFT avg/p95",
+        "TPOT avg/p95",
+        "ITL avg/p95",
+        "E2EL avg/p95",
     ):
         table.add_column(
             column,
@@ -498,9 +496,9 @@ def print_summary(result: RunResult, console: Console | None = None) -> None:
             _format_number(summary.request_throughput),
             _format_number(summary.output_token_throughput),
             _format_number(summary.decode_tokens_per_s),
-            _format_number(summary.ttft.p50_ms) + " ms",
-            _format_number(summary.ttft.p95_ms) + " ms",
-            _format_number(summary.tpot.p50_ms) + " ms",
-            _format_number(summary.e2el.p95_ms) + " ms",
+            _avg_p95(summary.ttft.mean_ms, summary.ttft.p95_ms),
+            _avg_p95(summary.tpot.mean_ms, summary.tpot.p95_ms),
+            _avg_p95(summary.itl.mean_ms, summary.itl.p95_ms),
+            _avg_p95(summary.e2el.mean_ms, summary.e2el.p95_ms),
         )
     output.print(table)
