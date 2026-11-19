@@ -64,6 +64,156 @@ uv run llmbench run config.yaml
 - `run.json`：配置能力、运行元数据
 - `errors.log`：失败请求
 
+## 示例配置
+
+仓库提供三份可直接参考的配置：
+
+| 文件 | 用途 | 运行方式 |
+|---|---|---|
+| `configs/vllm-chat.yaml` | 单个本地 vLLM/OpenAI-compatible chat 服务；并发 1/2/4/8，输入 128/1024，输出 128，启用 warmup 和 `ignore_eos` | 修改 `base_url`/`model` 后直接运行 |
+| `configs/compare.yaml` | 多 target 对比：本地 vLLM + DeepSeek 官方 API；重复 2 轮，适合比较模型/服务 | 设置 `DEEPSEEK_API_KEY` 后运行 |
+| `configs/per-target-tokenizers.yaml` | 每个 target 使用各自 tokenizer；包含 Qwen3.8-Flash-Next、DeepSeek-V4.1-Flash、GLM-5.3 示例 | 修改本地端口/model 后运行，需 tokenizer extra |
+
+```bash
+# 1. 单服务
+uv run llmbench validate configs/vllm-chat.yaml
+uv run llmbench run configs/vllm-chat.yaml
+
+# 2. 多服务对比
+export DEEPSEEK_API_KEY='...'
+uv run llmbench validate configs/compare.yaml
+uv run llmbench run configs/compare.yaml
+
+# 3. 每个 target 使用各自 tokenizer
+uv run --extra tokenizer llmbench validate configs/per-target-tokenizers.yaml
+uv run --extra tokenizer llmbench run configs/per-target-tokenizers.yaml --dry-run
+uv run --extra tokenizer llmbench run configs/per-target-tokenizers.yaml
+```
+
+`per-target-tokenizers.yaml` 中的 `127.0.0.1:8000/8001/8002` 只是占位地址，需要改成实际服务地址。
+
+## 配置参数参考
+
+完整结构：
+
+```yaml
+run:
+  name: my-run
+  seed: 42
+  output_dir: results
+  repeats: 1
+  cooldown_s: 2
+  save_generated_text: false
+  save_itl: false
+
+workload:
+  dataset: random
+  requests_per_cell: 16
+  warmup_requests: 2
+  concurrencies: [1, 2, 4]
+  input_lengths: [512]
+  output_lengths: [128]
+  system_prompt: ""
+  tokenizer: null
+  stream_options: auto
+
+targets:
+  - name: local-vllm
+    backend: openai-chat
+    base_url: http://127.0.0.1:8000/v1
+    model: Qwen/Qwen3-8B
+    tokenizer: qwen3.6-35b
+    api_key_env: null
+    headers: {}
+    timeout_s: 300
+    max_tokens_field: max_tokens
+    request_params:
+      temperature: 0
+    http2: false
+    verify_tls: true
+    ca_bundle: null
+```
+
+### `run`
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `name` | `run` | 运行名称，用于生成 `results/<run_id>/` 目录 |
+| `seed` | `42` | prompt 随机种子；相同 seed 和配置可复现 prompt |
+| `output_dir` | `results` | 结果根目录 |
+| `repeats` | `1` | 每个 target × cell 的正式重复测量轮数；每轮使用不同 prompt 集 |
+| `cooldown_s` | `0` | 每个 cell 的全部 target/repeat 完成后等待秒数 |
+| `save_generated_text` | `false` | 是否把模型生成文本写入 `requests.jsonl`；可能包含敏感内容 |
+| `save_itl` | `false` | 是否写入完整 ITL 序列；高并发/长输出时文件会明显变大 |
+
+### `workload`
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `dataset` | `random` | v1 仅支持 `random`，使用 vLLM 风格确定性随机 prompt |
+| `requests_per_cell` | `50` | 每个 target × cell × repeat 的正式请求数；必须 ≥ 最大并发 |
+| `warmup_requests` | `2` | 每个 target × cell 的预热请求数；不计入指标；`0` 表示关闭 |
+| `concurrencies` | `[1]` | closed-loop 并发扫描列表 |
+| `input_lengths` | `[512]` | 输入内容 token 数目标列表；包含 system prompt，不含 chat template |
+| `output_lengths` | `[128]` | 生成 token 数上限列表；实际输出可能因 EOS 提前结束 |
+| `system_prompt` | `""` | 可选 system prompt，会计入输入 token 预算 |
+| `tokenizer` | `null` | 全局参考 tokenizer，可用内置别名、`tokenizer.json`、模型目录或 HF repo id |
+| `stream_options` | `auto` | `auto`：probe 探测 usage；`include_usage`：强制发送；`none`：关闭 |
+
+Cell 由 `concurrency × input_length × output_length` 决定，ID 形如 `i512-o128-c4`。`repeats` 是同一 cell 的独立重复测量，不是 warmup。请求数计算：
+
+```text
+cell 数 = len(concurrencies) × len(input_lengths) × len(output_lengths)
+正式请求 = cell 数 × target 数 × repeats × requests_per_cell
+预热请求 = cell 数 × target 数 × warmup_requests
+```
+
+### `targets`
+
+| 参数 | 必填 | 说明 |
+|---|---:|---|
+| `name` | 是 | target 唯一名称，出现在结果中 |
+| `backend` | 否 | `openai-chat`（默认）或 `openai-completions` |
+| `base_url` | 是 | API base，通常包含 `/v1`；工具会追加对应 endpoint |
+| `model` | 是 | 服务端实际模型名；显示名和权重名不一致时以服务端为准 |
+| `tokenizer` | 否 | 覆盖 `workload.tokenizer`；建议使用实际权重对应的 tokenizer |
+| `api_key_env` | 否 | 读取 API Key 的环境变量名；不建议把 Key 写入 YAML |
+| `headers` | 否 | 额外 HTTP Header；支持 `${ENV_VAR}` 展开 |
+| `timeout_s` | 否 | 单请求总超时，默认 `300` 秒 |
+| `max_tokens_field` | 否 | 发送 `max_tokens`（默认）或 `max_completion_tokens` |
+| `request_params` | 否 | 合并进请求 body 的额外参数，如 `temperature`、`top_p`、`ignore_eos` |
+| `http2` | 否 | 是否启用 HTTP/2，默认 `false`；需要 `h2` 依赖 |
+| `verify_tls` | 否 | 是否校验 TLS，默认 `true` |
+| `ca_bundle` | 否 | 自定义 CA 文件路径 |
+
+`request_params` 不能覆盖 `model`、`messages`、`prompt`、`stream`、`stream_options`、`max_tokens`、`max_completion_tokens` 等协议保留字段。
+
+### API Key 和代理
+
+```bash
+export DEEPSEEK_API_KEY='...'
+```
+
+`api_key_env` 只保存环境变量名，配置文件和结果文件都不会写入解析后的 Key。`headers` 中的 `${VAR}` 同样在运行时展开；持久化配置只保留未展开的纯占位符。
+
+如果 `ALL_PROXY` 使用非标准 `socks://`，访问非 loopback 服务前请改为 `socks5://host:port` 或 unset；loopback 地址会自动忽略代理。URL query 值会在 dry-run 和持久化配置中脱敏，不要把密钥放在 URL path 或 query key 中。
+
+### 终端结果列
+
+| 列 | 说明 |
+|---|---|
+| `Target` | target 名称 |
+| `Cell` | 输入/输出/并发组合 |
+| `Repeat` | 重复轮次 |
+| `OK/Err` | 成功/失败请求数 |
+| `Req/s` | 请求吞吐 |
+| `Out tok/s` | 所有并发请求的聚合输出 token 吞吐 |
+| `Decode tok/s` | 单流 decode 吞吐，`1000 / mean TPOT ms` |
+| `TTFT avg/p95` | 首 token 延迟平均值/p95 |
+| `TPOT avg/p95` | 每输出 token 时间平均值/p95 |
+| `ITL avg/p95` | token 间延迟平均值/p95 |
+| `E2EL avg/p95` | 端到端延迟平均值/p95 |
+
 ## 指标
 
 - **TTFT**：请求发送到第一个 token-bearing delta 的时间。
