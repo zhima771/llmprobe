@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import re
 from collections.abc import Mapping
@@ -79,6 +80,8 @@ class AppConfig:
 def _mapping(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ConfigError(f"{path} must be a mapping")
+    if any(not isinstance(key, str) for key in value):
+        raise ConfigError(f"{path} keys must be strings")
     return value
 
 
@@ -101,8 +104,13 @@ def _integer(value: Any, path: str, *, minimum: int) -> int:
 
 
 def _number(value: Any, path: str, *, minimum: float) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < minimum:
-        raise ConfigError(f"{path} must be a number >= {minimum}")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < minimum
+    ):
+        raise ConfigError(f"{path} must be a finite number >= {minimum}")
     return float(value)
 
 
@@ -232,7 +240,7 @@ def _parse_target(raw: Any, index: int) -> TargetConfig:
     if api_key_env is not None:
         api_key_env = _string(api_key_env, f"{path}.api_key_env")
     headers = _string_map(data.get("headers", {}), f"{path}.headers")
-    if api_key_env and "Authorization" in headers:
+    if api_key_env and any(key.lower() == "authorization" for key in headers):
         raise ConfigError(f"{path} cannot set both api_key_env and Authorization header")
     request_params = dict(_mapping(data.get("request_params", {}), f"{path}.request_params"))
     reserved = sorted(_RESERVED_REQUEST_KEYS.intersection(request_params))
@@ -263,10 +271,19 @@ def load_config(
     config_path = Path(path)
     try:
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"cannot decode config {config_path} as UTF-8") from exc
     except OSError as exc:
         raise ConfigError(f"cannot read config {config_path}: {exc}") from exc
     except yaml.YAMLError as exc:
-        raise ConfigError(f"invalid YAML in {config_path}: {exc}") from exc
+        problem = getattr(exc, "problem", None)
+        message = f"invalid YAML in {config_path}"
+        if problem:
+            message += f": {problem}"
+        mark = getattr(exc, "problem_mark", None)
+        if mark is not None:
+            message += f" at line {mark.line + 1}, column {mark.column + 1}"
+        raise ConfigError(message) from None
     data = _mapping(raw, "config")
     _unknown_keys(data, {"run", "workload", "targets"}, "config")
     run = _parse_run(data.get("run", {}))

@@ -78,3 +78,79 @@ def test_unknown_top_level_key_is_rejected(tmp_path: Path) -> None:
     text = MINIMAL + "\nunknown: true\n"
     with pytest.raises(ConfigError, match="unknown"):
         load_config(write_config(tmp_path, text), environ={})
+
+
+def test_yaml_parser_error_does_not_leak_source_or_chain_exception(tmp_path: Path) -> None:
+    secret = "sk-super-secret"
+    text = MINIMAL.replace("model: test-model", f"model: [{secret}")
+    with pytest.raises(ConfigError) as exc_info:
+        load_config(write_config(tmp_path, text), environ={})
+    message = str(exc_info.value)
+    assert secret not in message
+    assert "line " in message
+    assert "column " in message
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+
+
+def test_non_string_mapping_key_is_a_config_error(tmp_path: Path) -> None:
+    text = MINIMAL + "\n1: true\n"
+    with pytest.raises(ConfigError, match="keys must be strings"):
+        load_config(write_config(tmp_path, text), environ={})
+
+
+@pytest.mark.parametrize("value", [".nan", ".inf", "-.inf"])
+def test_non_finite_number_is_rejected(tmp_path: Path, value: str) -> None:
+    text = MINIMAL.replace(
+        "    model: test-model\n",
+        f"    model: test-model\n    timeout_s: {value}\n",
+    )
+    with pytest.raises(ConfigError, match="finite"):
+        load_config(write_config(tmp_path, text), environ={})
+
+
+def test_authorization_header_conflict_is_case_insensitive(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "    model: test-model\n",
+        "    model: test-model\n"
+        "    api_key_env: TEST_KEY\n"
+        "    headers:\n"
+        "      authorization: Bearer literal\n",
+    )
+    with pytest.raises(ConfigError, match="Authorization"):
+        load_config(write_config(tmp_path, text), environ={"TEST_KEY": "secret"})
+
+
+def test_undecodable_config_is_a_config_error(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_bytes(b"\xff\xfe")
+    with pytest.raises(ConfigError, match="UTF-8"):
+        load_config(path, environ={})
+
+
+def test_missing_header_env_is_a_config_error(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "    model: test-model\n",
+        "    model: test-model\n    headers:\n      X-Tenant: ${MISSING_TENANT}\n",
+    )
+    with pytest.raises(ConfigError, match="MISSING_TENANT"):
+        load_config(write_config(tmp_path, text), environ={})
+
+
+def test_duplicate_target_names_are_rejected(tmp_path: Path) -> None:
+    text = MINIMAL + """
+  - name: local
+    base_url: http://127.0.0.1:8001/v1
+    model: another-model
+"""
+    with pytest.raises(ConfigError, match="unique"):
+        load_config(write_config(tmp_path, text), environ={})
+
+
+def test_completions_target_url_uses_backend_specific_endpoint(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "    model: test-model\n",
+        "    model: test-model\n    backend: openai-completions\n",
+    )
+    config = load_config(write_config(tmp_path, text), environ={})
+    assert target_url(config.targets[0]) == "http://127.0.0.1:8000/v1/completions"
