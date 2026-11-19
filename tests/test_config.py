@@ -232,3 +232,12 @@ def test_target_url_preserves_query_value_with_trailing_slash(tmp_path: Path) ->
         == "http://127.0.0.1:8000/v1/chat/completions"
         "?api-version=2024-01-01&route=/v1/"
     )
+
+
+def test_target_tokenizer_override_is_parsed(tmp_path: Path) -> None:
+    text = MINIMAL.replace(
+        "    model: test-model\n",
+        "    model: test-model\n    tokenizer: qwen3.6-35b\n",
+    )
+    config = load_config(write_config(tmp_path, text), environ={})
+    assert config.targets[0].tokenizer == "qwen3.6-35b"

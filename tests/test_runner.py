@@ -8,7 +8,7 @@ import pytest
 from llmbench.client import TargetProbeError
 from llmbench.config import AppConfig, ConfigError, RunConfig, TargetConfig, WorkloadConfig
 from llmbench.models import Cell, GeneratedPrompt, RequestResult
-from llmbench.runner import BenchmarkRunner, NullProgress
+from llmbench.runner import BenchmarkRunner, NullProgress, preflight_workload
 
 
 class FakeClient:
@@ -46,6 +46,7 @@ def config(
     output_lengths: tuple[int, ...] = (2,),
     system_prompt: str = "",
     tokenizer: str | None = None,
+    target_tokenizers: tuple[str | None, str | None] = (None, None),
 ) -> AppConfig:
     return AppConfig(
         run=RunConfig(
@@ -65,8 +66,18 @@ def config(
             stream_options=stream_options,  # type: ignore[arg-type]
         ),
         targets=(
-            TargetConfig(name="a", base_url="http://a/v1", model="m"),
-            TargetConfig(name="b", base_url="http://b/v1", model="m"),
+            TargetConfig(
+                name="a",
+                base_url="http://a/v1",
+                model="m",
+                tokenizer=target_tokenizers[0],
+            ),
+            TargetConfig(
+                name="b",
+                base_url="http://b/v1",
+                model="m",
+                tokenizer=target_tokenizers[1],
+            ),
         ),
     )
 
@@ -633,3 +644,95 @@ def test_partial_result_summarizes_completed_requests_after_run(
     assert len(partial.requests) == 4
     assert len(partial.summaries) == 2
     assert partial.run_id == result.run_id
+
+
+class MarkerTokenizer:
+    is_tokenizer = True
+    vocab_size = 1000
+
+    def __init__(self, marker: str) -> None:
+        self.marker = marker
+
+    def count(self, text: str) -> int:
+        return len(text.split())
+
+    def encode_ids(self, text: str) -> list[int]:
+        return [int(word.removeprefix(self.marker)) for word in text.split()]
+
+    def decode_ids(self, token_ids: list[int]) -> str:
+        return " ".join(f"{self.marker}{token_id}" for token_id in token_ids)
+
+    def truncate(self, text: str, max_tokens: int) -> str:
+        return " ".join(text.split()[:max_tokens])
+
+
+def test_preflight_loads_global_and_target_tokenizers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded: dict[str, MarkerTokenizer] = {
+        "global-spec": MarkerTokenizer("g"),
+        "target-spec": MarkerTokenizer("t"),
+    }
+    calls: list[str | None] = []
+
+    def fake_load(spec: str | None):
+        calls.append(spec)
+        return loaded[spec]  # type: ignore[index]
+
+    monkeypatch.setattr("llmbench.runner.load_tokenizer", fake_load)
+    config_with_overrides = config(
+        tmp_path,
+        tokenizer="global-spec",
+        target_tokenizers=("target-spec", None),
+    )
+    mapping = preflight_workload(config_with_overrides)
+    assert calls == ["target-spec", "global-spec"]
+    assert mapping["a"] is loaded["target-spec"]
+    assert mapping["b"] is loaded["global-spec"]
+
+
+def test_targets_with_different_tokenizers_get_distinct_prompts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded: dict[str, MarkerTokenizer] = {
+        "tokenizer-a": MarkerTokenizer("a"),
+        "tokenizer-b": MarkerTokenizer("b"),
+    }
+    seen: dict[str, tuple[str, MarkerTokenizer | None]] = {}
+
+    monkeypatch.setattr(
+        "llmbench.runner.load_tokenizer",
+        lambda spec: loaded[spec],  # type: ignore[index]
+    )
+
+    async def fake_request(
+        client: Any,
+        target: TargetConfig,
+        prompt: GeneratedPrompt,
+        **kwargs: Any,
+    ) -> RequestResult:
+        seen[target.name] = (prompt.user, kwargs["tokenizer"])
+        return make_result(
+            target.name,
+            kwargs["cell"],
+            kwargs["repeat"],
+            kwargs["request_index"],
+        )
+
+    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    runner = BenchmarkRunner(
+        config(
+            tmp_path,
+            stream_options="none",
+            warmup_requests=0,
+            requests_per_cell=1,
+            input_lengths=(8,),
+            target_tokenizers=("tokenizer-a", "tokenizer-b"),
+        ),
+        progress=NullProgress(),
+        environ={},
+    )
+    asyncio.run(runner.run())
+    assert seen["a"][1] is loaded["tokenizer-a"]
+    assert seen["b"][1] is loaded["tokenizer-b"]
+    assert seen["a"][0] != seen["b"][0]

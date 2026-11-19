@@ -58,23 +58,47 @@ class TargetUnavailable(RuntimeError):
     """Raised internally when a target cannot continue the run."""
 
 
+def _effective_tokenizer_spec(config: AppConfig, target: TargetConfig) -> str | None:
+    return target.tokenizer if target.tokenizer is not None else config.workload.tokenizer
+
+
 def preflight_workload(
     config: AppConfig, tokenizer: TextTokenizer | None = None
-) -> TextTokenizer | None:
-    active_tokenizer = tokenizer if tokenizer is not None else load_tokenizer(
-        config.workload.tokenizer
-    )
+) -> dict[str, TextTokenizer | None]:
     cells = build_cells(config.workload)
     minimum_cell = min(cells, key=lambda item: item.input_length)
-    generate_prompt(
-        config.run.seed,
-        minimum_cell,
-        -1,
-        0,
-        config.workload,
-        active_tokenizer,
-    )
-    return active_tokenizer
+    if tokenizer is not None:
+        generate_prompt(
+            config.run.seed,
+            minimum_cell,
+            -1,
+            0,
+            config.workload,
+            tokenizer,
+        )
+        return {target.name: tokenizer for target in config.targets}
+
+    tokenizers: dict[str, TextTokenizer | None] = {}
+    cache: dict[str | None, TextTokenizer | None] = {}
+    validated: set[int] = set()
+    for target in config.targets:
+        spec = _effective_tokenizer_spec(config, target)
+        if spec not in cache:
+            cache[spec] = load_tokenizer(spec)
+        active_tokenizer = cache[spec]
+        tokenizers[target.name] = active_tokenizer
+        cache_key = id(active_tokenizer) if active_tokenizer is not None else 0
+        if cache_key not in validated:
+            generate_prompt(
+                config.run.seed,
+                minimum_cell,
+                -1,
+                0,
+                config.workload,
+                active_tokenizer,
+            )
+            validated.add(cache_key)
+    return tokenizers
 
 
 class BenchmarkRunner:
@@ -102,7 +126,7 @@ class BenchmarkRunner:
     async def run(self) -> RunResult:
         self.started_at = self._now()
         self.ended_at = None
-        tokenizer = preflight_workload(self.config, self._tokenizer)
+        target_tokenizers = preflight_workload(self.config, self._tokenizer)
         cells = build_cells(self.config.workload)
         clients: dict[str, Any] = {}
         headers: dict[str, dict[str, str]] = {}
@@ -120,7 +144,7 @@ class BenchmarkRunner:
                         target,
                         clients[target.name],
                         headers[target.name],
-                        tokenizer,
+                        target_tokenizers[target.name],
                         cells,
                     )
                 )
@@ -147,7 +171,7 @@ class BenchmarkRunner:
                             headers[target.name],
                             cell,
                             include_usage[target.name],
-                            tokenizer,
+                            target_tokenizers[target.name],
                         )
                     except TargetUnavailable as exc:
                         self.capabilities[target.name] = replace(
@@ -158,30 +182,34 @@ class BenchmarkRunner:
                         self.progress.warning(f"target {target.name} disabled: {exc}")
 
                 for repeat in range(self.config.run.repeats):
-                    prompts = [
-                        generate_prompt(
-                            self.config.run.seed,
-                            cell,
-                            repeat,
-                            index,
-                            self.config.workload,
-                            tokenizer,
-                        )
-                        for index in range(self.config.workload.requests_per_cell)
-                    ]
+                    prompt_cache: dict[int, list[GeneratedPrompt]] = {}
                     for target in self.config.targets:
                         capability = self.capabilities[target.name]
                         if not capability.available:
                             continue
+                        active_tokenizer = target_tokenizers[target.name]
+                        cache_key = id(active_tokenizer) if active_tokenizer is not None else 0
+                        if cache_key not in prompt_cache:
+                            prompt_cache[cache_key] = [
+                                generate_prompt(
+                                    self.config.run.seed,
+                                    cell,
+                                    repeat,
+                                    index,
+                                    self.config.workload,
+                                    active_tokenizer,
+                                )
+                                for index in range(self.config.workload.requests_per_cell)
+                            ]
                         self.progress.cell_started(target.name, cell, repeat)
                         results = await self._execute_requests(
                             target=target,
                             client=clients[target.name],
                             headers=headers[target.name],
                             cell=cell,
-                            prompts=prompts,
+                            prompts=prompt_cache[cache_key],
                             include_usage=include_usage[target.name],
-                            tokenizer=tokenizer,
+                            tokenizer=active_tokenizer,
                             repeat=repeat,
                             record=True,
                         )

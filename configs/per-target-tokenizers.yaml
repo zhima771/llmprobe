@@ -1,0 +1,40 @@
+run:
+  name: per-target-tokenizers
+  seed: 42
+  output_dir: results
+  repeats: 1
+  cooldown_s: 2
+
+workload:
+  dataset: random
+  requests_per_cell: 16
+  warmup_requests: 2
+  concurrencies: [1, 2, 4]
+  input_lengths: [512]
+  output_lengths: [128]
+  stream_options: auto
+
+targets:
+  - name: qwen3.8-flash-next
+    backend: openai-chat
+    base_url: http://127.0.0.1:8000/v1
+    model: Qwen3.8-Flash-Next
+    tokenizer: qwen3.8-flash-next
+    request_params:
+      temperature: 0
+
+  - name: deepseek-v4.1-flash
+    backend: openai-chat
+    base_url: http://127.0.0.1:8001/v1
+    model: DeepSeek-V4.1-Flash-1017
+    tokenizer: deepseek-v4.1-flash
+    request_params:
+      temperature: 0
+
+  - name: glm-5.3
+    backend: openai-chat
+    base_url: http://127.0.0.1:8002/v1
+    model: GLM-5.3
+    tokenizer: glm-5.3
+    request_params:
+      temperature: 0

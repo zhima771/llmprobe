@@ -5,6 +5,9 @@ from typing import Protocol
 
 from llmbench.config import ConfigError
 
+_BUNDLED_TOKENIZER_ROOT = Path(__file__).with_name("tokenizers")
+_BUNDLED_PREFIXES = ("bundled:", "builtin:")
+
 
 class TextTokenizer(Protocol):
     @property
@@ -51,6 +54,41 @@ class LocalTokenizer:
         return self.decode_ids(encoding.ids[:max_tokens])
 
 
+def available_bundled_tokenizers() -> tuple[str, ...]:
+    if not _BUNDLED_TOKENIZER_ROOT.is_dir():
+        return ()
+    return tuple(
+        sorted(
+            child.name
+            for child in _BUNDLED_TOKENIZER_ROOT.iterdir()
+            if child.is_dir() and (child / "tokenizer.json").is_file()
+        )
+    )
+
+
+def _bundled_tokenizer_path(spec: str) -> Path | None:
+    alias = spec
+    explicit = False
+    for prefix in _BUNDLED_PREFIXES:
+        if spec.startswith(prefix):
+            alias = spec[len(prefix) :]
+            explicit = True
+            break
+    if not alias or Path(alias).name != alias:
+        if explicit:
+            raise ConfigError(f"invalid bundled tokenizer alias {alias!r}")
+        return None
+    path = _BUNDLED_TOKENIZER_ROOT / alias / "tokenizer.json"
+    if path.is_file():
+        return path
+    if explicit:
+        available = ", ".join(available_bundled_tokenizers()) or "(none)"
+        raise ConfigError(
+            f"unknown bundled tokenizer {alias!r}; available: {available}"
+        )
+    return None
+
+
 def load_tokenizer(spec: str | None) -> TextTokenizer | None:
     if not spec:
         return None
@@ -62,10 +100,22 @@ def load_tokenizer(spec: str | None) -> TextTokenizer | None:
             "pip install 'llmbench[tokenizer]'"
         ) from exc
     try:
-        if Path(spec).is_file():
-            tokenizer = Tokenizer.from_file(spec)
+        path = Path(spec)
+        if path.is_file():
+            tokenizer = Tokenizer.from_file(str(path))
+        elif path.is_dir():
+            tokenizer_file = path / "tokenizer.json"
+            if not tokenizer_file.is_file():
+                raise ConfigError(
+                    f"tokenizer directory {spec!r} does not contain tokenizer.json"
+                )
+            tokenizer = Tokenizer.from_file(str(tokenizer_file))
+        elif (bundled := _bundled_tokenizer_path(spec)) is not None:
+            tokenizer = Tokenizer.from_file(str(bundled))
         else:
             tokenizer = Tokenizer.from_pretrained(spec)
+    except ConfigError:
+        raise
     except Exception as exc:
         raise ConfigError(
             f"failed to load tokenizer {spec!r}: {type(exc).__name__}: {exc}"

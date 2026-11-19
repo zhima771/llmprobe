@@ -62,6 +62,7 @@ class TargetConfig:
     model: str
     backend: Literal["openai-chat", "openai-completions"] = "openai-chat"
     api_key_env: str | None = None
+    tokenizer: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     timeout_s: float = 300.0
     max_tokens_field: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
@@ -214,6 +215,7 @@ def _parse_target(raw: Any, index: int) -> TargetConfig:
             "base_url",
             "model",
             "api_key_env",
+            "tokenizer",
             "headers",
             "timeout_s",
             "max_tokens_field",
@@ -243,6 +245,9 @@ def _parse_target(raw: Any, index: int) -> TargetConfig:
     api_key_env = data.get("api_key_env")
     if api_key_env is not None:
         api_key_env = _string(api_key_env, f"{path}.api_key_env")
+    tokenizer = data.get("tokenizer")
+    if tokenizer is not None:
+        tokenizer = _string(tokenizer, f"{path}.tokenizer")
     headers = _string_map(data.get("headers", {}), f"{path}.headers")
     if api_key_env and any(key.lower() == "authorization" for key in headers):
         raise ConfigError(f"{path} cannot set both api_key_env and Authorization header")
@@ -259,6 +264,7 @@ def _parse_target(raw: Any, index: int) -> TargetConfig:
         base_url=base_url,
         model=_string(data.get("model"), f"{path}.model"),
         api_key_env=api_key_env,
+        tokenizer=tokenizer,
         headers=headers,
         timeout_s=_number(data.get("timeout_s", 300.0), f"{path}.timeout_s", minimum=0.001),
         max_tokens_field=max_tokens_field,  # type: ignore[arg-type]

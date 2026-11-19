@@ -14,7 +14,36 @@ uv sync --extra dev
 uv sync --extra dev --extra tokenizer
 ```
 
-仓库包含 `uv.lock`，`uv sync` 默认按锁定版本安装依赖。`tokenizer` 是可选 extra；启用后可在 workload 中通过本地 `tokenizer.json` 路径或 Hugging Face repo id 指定参考 tokenizer。
+仓库包含 `uv.lock`，`uv sync` 默认按锁定版本安装依赖。`tokenizer` 是可选 extra；启用后可以在 workload 或单个 target 上指定 tokenizer。
+
+### 内置 tokenizer
+
+`src/llmbench/tokenizers/` 内置了以下常用 tokenizer，可直接使用别名：
+
+- `qwen3.8-flash-next`
+- `qwen3.6-35b`
+- `deepseek-v4.1-flash`
+- `glm-5.3`
+
+```yaml
+workload:
+  tokenizer: qwen3.6-35b
+
+targets:
+  - name: qwen
+    base_url: http://127.0.0.1:8000/v1
+    model: Qwen3.6-35B-A3B
+    tokenizer: qwen3.6-35b
+
+  - name: deepseek
+    base_url: http://127.0.0.1:8001/v1
+    model: DeepSeek-V4.1-Flash-1017
+    tokenizer: deepseek-v4.1-flash
+```
+
+`target.tokenizer` 会覆盖 `workload.tokenizer`。相同 tokenizer 的 target 共享同一组 prompt；不同 tokenizer 的 target 会各自生成目标 token 长度的 prompt，因此同一并发下各模型的计算负载更接近。若要求所有 target 接收完全相同的 prompt 文本，只设置全局 `workload.tokenizer`，不要在 target 上覆盖。
+
+内置文件来源、SHA256 和许可证说明见 `src/llmbench/tokenizers/README.md` 与 `manifest.json`。也可以使用 `tokenizer.json` 文件路径、包含 `tokenizer.json` 的模型目录，或 Hugging Face repo id。
 
 ## 快速开始
 
@@ -52,7 +81,8 @@ uv run llmbench run config.yaml
 - `dataset: random` 是 v1 唯一支持的数据集，参考 vLLM benchmark random 数据集的思路：使用固定 seed、稳定 cell key 和请求序号生成确定性随机 prompt。
 - 有 tokenizer 时（tokenizer-backed）：从参考 tokenizer 词表生成确定性 token ID 序列，decode 为文本并尽力 re-encode 到目标内容 token 数；所有 target 收到相同文本。
 - 无 tokenizer 时（fallback approximation）：使用确定性随机词序列和约 4 字符/token 的启发式接近目标长度；没有服务端 usage 时通常无法得到输入 token 数。
-- `workload.tokenizer` 是跨 target 的参考 tokenizer，只用于构造 prompt 和估算；实际输入/输出 token 数优先采用各服务的 usage，并记录 token count source 与 `estimated` 标记。
+- `workload.tokenizer` 是全局参考 tokenizer；`targets[].tokenizer` 可覆盖它。tokenizer 只用于构造 prompt 和估算，实际输入/输出 token 数优先采用各服务的 usage，并记录 token count source 与 `estimated` 标记。
+- 使用内置别名时不需要复制模型权重；只需要 `tokenizer.json`。
 - `random-range-ratio` 在 v1 中尚未实现；同一 cell 的 `input_lengths` / `output_lengths` 是固定目标值，不是随机区间。
 - `concurrencies`、`input_lengths`、`output_lengths` 是扫描列表。
 - `requests_per_cell` 必须不小于最大并发。
