@@ -33,7 +33,7 @@ _MANAGED_PAYLOAD_KEYS = frozenset(
     }
 )
 _REDACTED_SECRET = "<redacted>"
-_PERCENT_ESCAPE = re.compile(r"%[0-9A-F]{2}")
+_PERCENT_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
 
 
 def _force_percent_encode(value: str) -> str:
@@ -48,19 +48,23 @@ def _percent_encode_punctuation(value: str) -> str:
 
 
 def _encoded_secret_variants(value: str) -> set[str]:
-    encoded_values = {
+    return {
         quote(value, safe=""),
         quote_plus(value),
         _percent_encode_punctuation(value),
         _force_percent_encode(value),
     }
-    variants: set[str] = set()
-    for encoded in encoded_values:
-        variants.add(encoded)
-        variants.add(
-            _PERCENT_ESCAPE.sub(lambda match: match.group(0).lower(), encoded)
-        )
-    return variants
+
+
+def _encoded_secret_pattern(value: str) -> str:
+    pieces: list[str] = []
+    start = 0
+    for match in _PERCENT_ESCAPE.finditer(value):
+        pieces.append(re.escape(value[start : match.start()]))
+        pieces.append("%[0-9A-Fa-f]{2}")
+        start = match.end()
+    pieces.append(re.escape(value[start:]))
+    return "".join(pieces)
 
 
 def _query_secret_values(url: str) -> set[str]:
@@ -86,31 +90,45 @@ def _header_secret_values(headers: Mapping[str, str]) -> set[str]:
         if not value:
             continue
         values.add(value)
-        scheme, separator, credential = value.partition(" ")
-        if separator and credential and scheme.lower() in {"bearer", "basic"}:
-            values.add(credential)
+        parts = value.split(None, 1)
+        if len(parts) == 2:
+            scheme, credential = parts
+            if scheme.lower() in {"bearer", "basic"}:
+                values.add(credential)
     return values
 
 
-def _secret_variants(headers: Mapping[str, str], url: str | None) -> list[str]:
+def _secret_patterns(headers: Mapping[str, str], url: str | None) -> list[str]:
     values = _header_secret_values(headers)
     if url is not None:
         values.update(_query_secret_values(url))
 
-    variants = set(values)
+    patterns: dict[str, int] = {}
     for value in values:
-        variants.update(_encoded_secret_variants(value))
-    return sorted((value for value in variants if value), key=len, reverse=True)
+        if not value:
+            continue
+        raw_pattern = re.escape(value)
+        patterns[raw_pattern] = max(patterns.get(raw_pattern, 0), len(value))
+        for encoded in _encoded_secret_variants(value):
+            encoded_pattern = _encoded_secret_pattern(encoded)
+            patterns[encoded_pattern] = max(
+                patterns.get(encoded_pattern, 0), len(encoded)
+            )
+    return [
+        pattern
+        for pattern, _ in sorted(
+            patterns.items(), key=lambda item: item[1], reverse=True
+        )
+    ]
 
 
 def _redact_secrets(
     text: str, headers: Mapping[str, str], url: str | None = None
 ) -> str:
-    variants = _secret_variants(headers, url)
-    if not variants:
+    patterns = _secret_patterns(headers, url)
+    if not patterns:
         return text
-    pattern = "|".join(re.escape(value) for value in variants)
-    return re.sub(pattern, _REDACTED_SECRET, text)
+    return re.sub("|".join(patterns), _REDACTED_SECRET, text)
 
 
 def _is_loopback_url(url: str) -> bool:

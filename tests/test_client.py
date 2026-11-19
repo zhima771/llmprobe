@@ -61,6 +61,21 @@ def force_percent_encode(value: str) -> str:
     return "".join(f"%{byte:02X}" for byte in value.encode("utf-8"))
 
 
+def mixed_case_percent_encode(value: str) -> str:
+    pieces: list[str] = []
+    lower_next = False
+    for byte in value.encode("utf-8"):
+        chars: list[str] = []
+        for char in f"{byte:02X}":
+            if char in "ABCDEF":
+                chars.append(char.lower() if lower_next else char)
+                lower_next = not lower_next
+            else:
+                chars.append(char)
+        pieces.append("%" + "".join(chars))
+    return "".join(pieces)
+
+
 def test_build_payload_uses_target_token_field() -> None:
     payload = build_payload(
         target(max_tokens_field="max_completion_tokens"),
@@ -529,6 +544,94 @@ def test_probe_usage_redacts_query_values_from_errors() -> None:
         assert fully_encoded not in message
         assert fully_encoded.lower() not in message
         assert "<redacted>" in message
+
+    asyncio.run(scenario())
+
+
+def test_stream_request_redacts_mixed_case_fully_encoded_query_value() -> None:
+    query_value = "A_F-B"
+    mixed_encoded = mixed_case_percent_encode(query_value)
+    assert any(char.islower() for char in mixed_encoded if char in "abcdef")
+    assert any(char.isupper() for char in mixed_encoded if char in "ABCDEF")
+    request_target = target(base_url=f"http://mock/v1?api-version={query_value}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text=f"request failed; mixed={mixed_encoded}")
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await stream_request(
+                client,
+                request_target,
+                prompt(),
+                tokenizer=None,
+                include_usage=False,
+                request_index=0,
+                repeat=0,
+                cell=cell(),
+                client_queue_s=0.0,
+                headers={},
+                save_generated_text=False,
+            )
+        assert result.error is not None
+        assert query_value not in result.error
+        assert mixed_encoded not in result.error
+        assert "<redacted>" in result.error
+
+    asyncio.run(scenario())
+
+
+def test_probe_usage_redacts_mixed_case_fully_encoded_query_value() -> None:
+    query_value = "A_F-B"
+    mixed_encoded = mixed_case_percent_encode(query_value)
+    request_target = target(base_url=f"http://mock/v1?api-version={query_value}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text=f"probe failed; mixed={mixed_encoded}")
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(TargetProbeError) as exc_info:
+                await probe_usage(
+                    client,
+                    request_target,
+                    prompt(),
+                    tokenizer=None,
+                    headers={},
+                    cell=cell(),
+                )
+        message = str(exc_info.value)
+        assert query_value not in message
+        assert mixed_encoded not in message
+        assert "<redacted>" in message
+
+    asyncio.run(scenario())
+
+
+def test_stream_request_redacts_bearer_credential_after_multiple_spaces() -> None:
+    credential = "header-secret"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text=f"credential={credential}")
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await stream_request(
+                client,
+                target(),
+                prompt(),
+                tokenizer=None,
+                include_usage=False,
+                request_index=0,
+                repeat=0,
+                cell=cell(),
+                client_queue_s=0.0,
+                headers={"Authorization": f"Bearer  {credential}"},
+                save_generated_text=False,
+            )
+        assert result.error is not None
+        assert credential not in result.error
+        assert "<redacted>" in result.error
 
     asyncio.run(scenario())
 
