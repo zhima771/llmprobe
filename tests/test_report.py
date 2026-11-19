@@ -5,6 +5,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from rich.console import Console
 
 from llmbench.config import AppConfig, RunConfig, TargetConfig, WorkloadConfig
@@ -89,6 +90,24 @@ def make_summary(item: RequestResult, repeat: int = 0) -> CellSummary:
     return summarize_results([repeated], cell, "mock", repeat)
 
 
+def make_config_with_request_params(
+    params: dict[str, object], *, api_key_env: str | None = None
+) -> AppConfig:
+    return AppConfig(
+        run=RunConfig(),
+        workload=WorkloadConfig(requests_per_cell=1),
+        targets=(
+            TargetConfig(
+                name="mock",
+                base_url="http://mock/v1",
+                model="m",
+                api_key_env=api_key_env,
+                request_params=params,
+            ),
+        ),
+    )
+
+
 def make_run(
     summaries: list[CellSummary],
     requests: list[RequestResult],
@@ -155,6 +174,64 @@ def test_config_to_dict_serializes_paths_and_redacts_nested_secrets(tmp_path: Pa
         assert secret not in rendered
 
 
+@pytest.mark.parametrize(
+    "key",
+    [
+        "Authorization",
+        "api_key",
+        "api_keys",
+        "apiKey",
+        "apiKeyValue",
+        "X-API-Key",
+        "access_token",
+        "access_tokens",
+        "refresh_token",
+        "session_token",
+        "auth_token",
+        "id_token",
+        "password",
+        "passwords",
+        "password_hash",
+        "secret",
+        "secrets",
+        "client_secret",
+        "client_secrets",
+        "cookie",
+        "cookies",
+        "credential",
+        "credentials",
+    ],
+)
+def test_sensitive_key_variants_are_redacted(key: str) -> None:
+    config = make_config_with_request_params({key: "do-not-emit"})
+
+    target = config_to_dict(config)["targets"][0]
+
+    assert target["request_params"][key] == "<redacted>"
+    assert "do-not-emit" not in json.dumps(target)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "max_tokens",
+        "max_token",
+        "stop_token",
+        "stop_tokens",
+        "api_key_env",
+    ],
+)
+def test_benign_token_keys_are_not_redacted(key: str) -> None:
+    config = make_config_with_request_params(
+        {key: "benchmark-value"}, api_key_env="PROVIDER_API_KEY"
+    )
+
+    target = config_to_dict(config)["targets"][0]
+
+    assert target["api_key_env"] == "PROVIDER_API_KEY"
+    assert target["request_params"][key] == "benchmark-value"
+
+
 def test_request_serialization_respects_optional_payloads() -> None:
     item = make_result()
 
@@ -209,11 +286,38 @@ def test_write_report_creates_all_files_and_redacts_secret(tmp_path: Path) -> No
         assert "super-secret" not in path.read_text(encoding="utf-8")
     with (output / "summary.csv").open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
-    assert rows[0]["target"] == "mock"
-    assert rows[0]["cell_id"] == "i8-o2-c1"
-    assert rows[0]["repeat"] == "0"
-    assert json.loads(rows[0]["token_sources"]) == {"usage/usage": 1}
-    assert all(value is not None for value in rows[0].values())
+    expected_csv = {
+        "target": "mock",
+        "cell_id": "i8-o2-c1",
+        "repeat": "0",
+        "concurrency": "1",
+        "input_length": "8",
+        "output_length": "2",
+        "completed": "1",
+        "failed": "0",
+        "error_rate": "0.0",
+        "ttft_mean_ms": "10.0",
+        "ttft_p50_ms": "10.0",
+        "ttft_p95_ms": "10.0",
+        "ttft_p99_ms": "10.0",
+        "tpot_mean_ms": "10.0",
+        "tpot_p50_ms": "10.0",
+        "tpot_p95_ms": "10.0",
+        "itl_p95_ms": "10.0",
+        "e2el_p50_ms": "20.0",
+        "e2el_p95_ms": "20.0",
+        "decode_tokens_per_s_per_stream": "100.0",
+        "input_tokens_mean": "8.0",
+        "output_tokens_mean": "2.0",
+        "peak_concurrency": "1",
+        "token_sources": '{"usage/usage": 1}',
+    }
+    for field, expected in expected_csv.items():
+        assert rows[0][field] == expected
+    assert rows[0]["duration_s"] != ""
+    assert rows[0]["request_throughput"] != ""
+    assert rows[0]["output_token_throughput"] != ""
+    assert rows[0]["total_token_throughput"] != ""
     payload = json.loads((output / "run.json").read_text(encoding="utf-8"))
     assert payload["schema_version"] == 1
     assert payload["capabilities"][0]["name"] == "mock"
@@ -256,48 +360,73 @@ def test_write_report_honors_save_flags_and_writes_errors(tmp_path: Path) -> Non
     )
 
 
+def test_errors_log_escapes_embedded_line_breaks(tmp_path: Path) -> None:
+    failed = replace(
+        make_result(),
+        success=False,
+        error_kind="stream",
+        error="first\r\nsecond\nthird\rfourth",
+    )
+    run = make_run([make_summary(failed)], [failed])
+
+    output = write_report(run, make_config(tmp_path))
+    log = (output / "errors.log").read_text(encoding="utf-8")
+
+    assert log == "mock i8-o2-c1 repeat=0 request=0: stream: first\\r\\nsecond\\nthird\\rfourth\n"
+    assert log.count("\n") == 1
+
+
 def test_summary_outputs_include_repeat_rows_and_cross_repeat_mean_std(
     tmp_path: Path,
 ) -> None:
     config = make_config(tmp_path)
-    first_request = replace(make_result(), ttft_s=0.01, repeat=0)
-    second_request = replace(make_result(), ttft_s=0.02, repeat=1)
+    first_request = replace(
+        make_result(),
+        repeat=0,
+        started_at=0.0,
+        stream_end_s=1.0,
+        ttft_s=0.01,
+        e2el_s=0.02,
+        tpot_s=0.01,
+        itl_s=[0.01],
+    )
+    second_request = replace(
+        make_result(),
+        repeat=1,
+        started_at=0.0,
+        stream_end_s=1.0,
+        ttft_s=0.02,
+        e2el_s=0.04,
+        tpot_s=0.03,
+        itl_s=[0.03],
+    )
     first_summary = make_summary(first_request, repeat=0)
     second_summary = make_summary(second_request, repeat=1)
     run = make_run([first_summary, second_summary], [first_request, second_request])
 
     output = write_report(run, config)
     payload = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+
     assert [item["repeat"] for item in payload["summaries"]] == [0, 1]
     assert payload["summaries"][0]["ttft"]["p50_ms"] == 10.0
+    assert payload["summaries"][1]["ttft"]["p50_ms"] == 20.0
     assert payload["cross_repeat"] == [
         {
             "target": "mock",
             "cell_id": "i8-o2-c1",
             "repeats": 2,
             "metrics": {
-                "request_throughput": {
-                    "mean": payload["cross_repeat"][0]["metrics"]["request_throughput"][
-                        "mean"
-                    ],
-                    "std": payload["cross_repeat"][0]["metrics"]["request_throughput"][
-                        "std"
-                    ],
-                },
-                "output_token_throughput": payload["cross_repeat"][0]["metrics"][
-                    "output_token_throughput"
-                ],
-                "total_token_throughput": payload["cross_repeat"][0]["metrics"][
-                    "total_token_throughput"
-                ],
+                "request_throughput": {"mean": 1.0, "std": 0.0},
+                "output_token_throughput": {"mean": 2.0, "std": 0.0},
+                "total_token_throughput": {"mean": 10.0, "std": 0.0},
                 "ttft_p50_ms": {"mean": 15.0, "std": 5.0},
                 "ttft_p95_ms": {"mean": 15.0, "std": 5.0},
                 "ttft_p99_ms": {"mean": 15.0, "std": 5.0},
-                "tpot_p50_ms": payload["cross_repeat"][0]["metrics"]["tpot_p50_ms"],
-                "tpot_p95_ms": payload["cross_repeat"][0]["metrics"]["tpot_p95_ms"],
-                "itl_p95_ms": payload["cross_repeat"][0]["metrics"]["itl_p95_ms"],
-                "e2el_p50_ms": payload["cross_repeat"][0]["metrics"]["e2el_p50_ms"],
-                "e2el_p95_ms": payload["cross_repeat"][0]["metrics"]["e2el_p95_ms"],
+                "tpot_p50_ms": {"mean": 20.0, "std": 10.0},
+                "tpot_p95_ms": {"mean": 20.0, "std": 10.0},
+                "itl_p95_ms": {"mean": 20.0, "std": 10.0},
+                "e2el_p50_ms": {"mean": 30.0, "std": 10.0},
+                "e2el_p95_ms": {"mean": 30.0, "std": 10.0},
             },
         }
     ]

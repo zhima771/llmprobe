@@ -6,6 +6,7 @@ import re
 import statistics
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -17,65 +18,29 @@ from llmbench.config import AppConfig
 from llmbench.models import CellSummary, RequestResult, RunResult
 
 _REDACTED = "<redacted>"
-_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_CAMEL_BOUNDARY = re.compile(
+    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
+)
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
-_SENSITIVE_KEYS = {
+_SENSITIVE_TOKENS = {
     "authorization",
-    "proxy_authorization",
-    "api_key",
-    "apikey",
-    "access_token",
-    "refresh_token",
-    "token",
-    "secret",
-    "client_secret",
     "password",
+    "passwords",
     "passwd",
+    "secret",
+    "secrets",
     "cookie",
-    "set_cookie",
+    "cookies",
     "credential",
     "credentials",
     "auth",
     "bearer",
-    "private_key",
-    "secret_key",
-    "signing_key",
-    "key",
 }
-_SENSITIVE_SUFFIXES = (
-    "_authorization",
-    "_api_key",
-    "_apikey",
-    "_access_token",
-    "_refresh_token",
-    "_token",
-    "_secret",
-    "_password",
-    "_passwd",
-    "_cookie",
-    "_credential",
-    "_credentials",
-    "_private_key",
-    "_secret_key",
-    "_signing_key",
-)
-_SENSITIVE_COMPACT_SUFFIXES = (
-    "authorization",
-    "apikey",
-    "accesstoken",
-    "refreshtoken",
-    "authtoken",
-    "token",
-    "secret",
-    "clientsecret",
-    "password",
-    "passwd",
-    "cookie",
-    "setcookie",
-    "privatekey",
-    "secretkey",
-    "signingkey",
-)
+_TOKEN_QUALIFIERS = {"access", "refresh", "session", "auth", "id", "bearer", "oauth"}
+_TOKEN_NAMES = {"token", "tokens"}
+_KEY_QUALIFIERS = {"api", "private", "signing", "secret"}
+_KEY_NAMES = {"key", "keys"}
+_API_KEY_ENV_TOKENS = ("api", "key", "env")
 _CSV_FIELDS = [
     "target",
     "cell_id",
@@ -133,19 +98,34 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def _normalized_key(key: Any) -> tuple[str, str]:
-    with_camel_boundaries = _CAMEL_BOUNDARY.sub("_", str(key)).lower()
-    normalized = _NON_ALNUM.sub("_", with_camel_boundaries).strip("_")
-    return normalized, normalized.replace("_", "")
+def _normalized_tokens(key: Any) -> tuple[str, ...]:
+    with_camel_boundaries = _CAMEL_BOUNDARY.sub("_", str(key))
+    normalized = _NON_ALNUM.sub("_", with_camel_boundaries.lower()).strip("_")
+    return tuple(part for part in normalized.split("_") if part)
+
+
+def _has_adjacent_tokens(
+    tokens: tuple[str, ...], first: set[str], second: set[str]
+) -> bool:
+    return any(
+        left in first and right in second
+        for left, right in pairwise(tokens)
+    )
 
 
 def _is_sensitive_key(key: Any) -> bool:
-    normalized, compact = _normalized_key(key)
-    return (
-        normalized in _SENSITIVE_KEYS
-        or normalized.endswith(_SENSITIVE_SUFFIXES)
-        or compact.endswith(_SENSITIVE_COMPACT_SUFFIXES)
-    )
+    tokens = _normalized_tokens(key)
+    if not tokens:
+        return False
+    if tokens == _API_KEY_ENV_TOKENS:
+        return False
+    if _SENSITIVE_TOKENS.intersection(tokens):
+        return True
+    if _has_adjacent_tokens(tokens, _TOKEN_QUALIFIERS, _TOKEN_NAMES):
+        return True
+    if _has_adjacent_tokens(tokens, _KEY_QUALIFIERS, _KEY_NAMES):
+        return True
+    return tokens == ("token",)
 
 
 def _redact(value: Any) -> Any:
@@ -298,6 +278,10 @@ def _format_number(value: float | None, digits: int = 2) -> str:
     return "-" if value is None else f"{value:.{digits}f}"
 
 
+def _escape_line_breaks(value: str) -> str:
+    return value.replace("\r", "\\r").replace("\n", "\\n")
+
+
 def _markdown(result: RunResult) -> str:
     lines = [
         f"# Benchmark Report: {result.run_id}",
@@ -392,8 +376,10 @@ def write_report(result: RunResult, config: AppConfig) -> Path:
     (run_dir / "summary.md").write_text(_markdown(result), encoding="utf-8")
 
     errors = [
-        f"{item.target} {item.cell_id} repeat={item.repeat} request={item.request_index}: "
-        f"{item.error_kind or 'error'}: {item.error}"
+        _escape_line_breaks(
+            f"{item.target} {item.cell_id} repeat={item.repeat} "
+            f"request={item.request_index}: {item.error_kind or 'error'}: {item.error}"
+        )
         for item in result.requests
         if not item.success
     ]
