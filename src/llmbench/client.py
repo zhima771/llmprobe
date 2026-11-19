@@ -32,10 +32,38 @@ _MANAGED_PAYLOAD_KEYS = frozenset(
         "max_completion_tokens",
     }
 )
-_REDACTED_QUERY_VALUE = "<redacted>"
+_REDACTED_SECRET = "<redacted>"
+_PERCENT_ESCAPE = re.compile(r"%[0-9A-F]{2}")
 
 
-def _query_value_variants(url: str) -> set[str]:
+def _force_percent_encode(value: str) -> str:
+    return "".join(f"%{byte:02X}" for byte in value.encode("utf-8"))
+
+
+def _percent_encode_punctuation(value: str) -> str:
+    return "".join(
+        chr(byte) if byte < 128 and chr(byte).isalnum() else f"%{byte:02X}"
+        for byte in value.encode("utf-8")
+    )
+
+
+def _encoded_secret_variants(value: str) -> set[str]:
+    encoded_values = {
+        quote(value, safe=""),
+        quote_plus(value),
+        _percent_encode_punctuation(value),
+        _force_percent_encode(value),
+    }
+    variants: set[str] = set()
+    for encoded in encoded_values:
+        variants.add(encoded)
+        variants.add(
+            _PERCENT_ESCAPE.sub(lambda match: match.group(0).lower(), encoded)
+        )
+    return variants
+
+
+def _query_secret_values(url: str) -> set[str]:
     parsed = urlsplit(url)
     if not parsed.query:
         return set()
@@ -49,38 +77,40 @@ def _query_value_variants(url: str) -> set[str]:
     for _, value in parse_qsl(parsed.query, keep_blank_values=True):
         if value:
             values.add(value)
+    return values
+
+
+def _header_secret_values(headers: Mapping[str, str]) -> set[str]:
+    values: set[str] = set()
+    for value in headers.values():
+        if not value:
+            continue
+        values.add(value)
+        scheme, separator, credential = value.partition(" ")
+        if separator and credential and scheme.lower() in {"bearer", "basic"}:
+            values.add(credential)
+    return values
+
+
+def _secret_variants(headers: Mapping[str, str], url: str | None) -> list[str]:
+    values = _header_secret_values(headers)
+    if url is not None:
+        values.update(_query_secret_values(url))
 
     variants = set(values)
     for value in values:
-        fully_encoded = "".join(
-            chr(byte) if byte < 128 and chr(byte).isalnum() else f"%{byte:02X}"
-            for byte in value.encode("utf-8")
-        )
-        encoded_values = {quote(value, safe=""), quote_plus(value), fully_encoded}
-        for encoded in encoded_values:
-            variants.add(encoded)
-            variants.add(re.sub(r"%[0-9A-F]{2}", lambda match: match.group(0).lower(), encoded))
-    return {value for value in variants if value}
+        variants.update(_encoded_secret_variants(value))
+    return sorted((value for value in variants if value), key=len, reverse=True)
 
 
 def _redact_secrets(
     text: str, headers: Mapping[str, str], url: str | None = None
 ) -> str:
-    if url is not None:
-        for secret in sorted(_query_value_variants(url), key=len, reverse=True):
-            text = text.replace(secret, _REDACTED_QUERY_VALUE)
-
-    secrets: set[str] = set()
-    for value in headers.values():
-        if not value:
-            continue
-        secrets.add(value)
-        scheme, separator, credential = value.partition(" ")
-        if separator and credential and scheme.lower() in {"bearer", "basic"}:
-            secrets.add(credential)
-    for secret in sorted(secrets, key=len, reverse=True):
-        text = text.replace(secret, "[REDACTED]")
-    return text
+    variants = _secret_variants(headers, url)
+    if not variants:
+        return text
+    pattern = "|".join(re.escape(value) for value in variants)
+    return re.sub(pattern, _REDACTED_SECRET, text)
 
 
 def _is_loopback_url(url: str) -> bool:

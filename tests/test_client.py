@@ -57,6 +57,10 @@ def cell() -> Cell:
     return Cell(id="i5-o3-c1", concurrency=1, input_length=5, output_length=3)
 
 
+def force_percent_encode(value: str) -> str:
+    return "".join(f"%{byte:02X}" for byte in value.encode("utf-8"))
+
+
 def test_build_payload_uses_target_token_field() -> None:
     payload = build_payload(
         target(max_tokens_field="max_completion_tokens"),
@@ -450,18 +454,23 @@ def test_stream_request_redacts_header_secrets_from_http_errors() -> None:
         assert result.success is False
         assert result.error is not None
         assert secret not in result.error
-        assert "REDACTED" in result.error
+        assert "<redacted>" in result.error
 
     asyncio.run(scenario())
 
 
 def test_stream_request_redacts_query_values_from_http_errors() -> None:
-    request_target = target(base_url="http://mock/v1?api-version=QUERY-SECRET")
+    query_value = "QUERY-SECRET"
+    fully_encoded = force_percent_encode(query_value)
+    request_target = target(base_url=f"http://mock/v1?api-version={query_value}")
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             500,
-            text=f"request failed for {request.url}; encoded=QUERY%2DSECRET",
+            text=(
+                f"request failed for {request.url}; encoded=QUERY%2DSECRET; "
+                f"fully={fully_encoded}; lower={fully_encoded.lower()}"
+            ),
         )
 
     async def scenario() -> None:
@@ -480,20 +489,27 @@ def test_stream_request_redacts_query_values_from_http_errors() -> None:
                 save_generated_text=False,
             )
         assert result.error is not None
-        assert "QUERY-SECRET" not in result.error
+        assert query_value not in result.error
         assert "QUERY%2DSECRET" not in result.error
+        assert fully_encoded not in result.error
+        assert fully_encoded.lower() not in result.error
         assert "<redacted>" in result.error
 
     asyncio.run(scenario())
 
 
 def test_probe_usage_redacts_query_values_from_errors() -> None:
-    request_target = target(base_url="http://mock/v1?api-version=QUERY-SECRET")
+    query_value = "QUERY-SECRET"
+    fully_encoded = force_percent_encode(query_value)
+    request_target = target(base_url=f"http://mock/v1?api-version={query_value}")
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             401,
-            text=f"probe failed for {request.url}; encoded=QUERY%2DSECRET",
+            text=(
+                f"probe failed for {request.url}; encoded=QUERY%2DSECRET; "
+                f"fully={fully_encoded}; lower={fully_encoded.lower()}"
+            ),
         )
 
     async def scenario() -> None:
@@ -508,9 +524,85 @@ def test_probe_usage_redacts_query_values_from_errors() -> None:
                     cell=cell(),
                 )
         message = str(exc_info.value)
-        assert "QUERY-SECRET" not in message
+        assert query_value not in message
         assert "QUERY%2DSECRET" not in message
+        assert fully_encoded not in message
+        assert fully_encoded.lower() not in message
         assert "<redacted>" in message
+
+    asyncio.run(scenario())
+
+
+def test_stream_request_redacts_fully_encoded_header_and_credential_variants() -> None:
+    credential = "header-secret"
+    full_secret = f"Bearer {credential}"
+    encoded_full = force_percent_encode(full_secret)
+    encoded_credential = force_percent_encode(credential)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            text=(
+                f"full={encoded_full}; lower={encoded_full.lower()}; "
+                f"credential={encoded_credential}; credential_lower={encoded_credential.lower()}"
+            ),
+        )
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await stream_request(
+                client,
+                target(),
+                prompt(),
+                tokenizer=None,
+                include_usage=False,
+                request_index=0,
+                repeat=0,
+                cell=cell(),
+                client_queue_s=0.0,
+                headers={"Authorization": full_secret},
+                save_generated_text=False,
+            )
+        assert result.error is not None
+        assert encoded_full not in result.error
+        assert encoded_full.lower() not in result.error
+        assert encoded_credential not in result.error
+        assert encoded_credential.lower() not in result.error
+        assert "<redacted>" in result.error
+
+    asyncio.run(scenario())
+
+
+def test_redaction_prefers_longer_header_secret_over_overlapping_query_value() -> None:
+    full_secret = "Bearer abcsuper-secret"
+    request_target = target(base_url="http://mock/v1?api-version=abc")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            text=f"Authorization: {full_secret}; request={request.url}",
+        )
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await stream_request(
+                client,
+                request_target,
+                prompt(),
+                tokenizer=None,
+                include_usage=False,
+                request_index=0,
+                repeat=0,
+                cell=cell(),
+                client_queue_s=0.0,
+                headers={"Authorization": full_secret},
+                save_generated_text=False,
+            )
+        assert result.error is not None
+        assert full_secret not in result.error
+        assert "abcsuper-secret" not in result.error
+        assert "super-secret" not in result.error
+        assert "<redacted>" in result.error
 
     asyncio.run(scenario())
 
@@ -571,7 +663,7 @@ def test_probe_usage_only_retries_explicit_stream_options_400() -> None:
         assert seen == [True]
         assert "500" in message
         assert secret not in message
-        assert "REDACTED" in message
+        assert "<redacted>" in message
 
     asyncio.run(scenario())
 
