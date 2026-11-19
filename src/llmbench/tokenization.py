@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol
 
 from llmbench.config import ConfigError
@@ -60,8 +61,13 @@ def load_tokenizer(spec: str | None) -> TextTokenizer | None:
             "tokenizer support requires the optional dependencies: "
             "pip install 'llmbench[tokenizer]'"
         ) from exc
-    if "/" in spec and not spec.endswith(".json"):
-        tokenizer = Tokenizer.from_pretrained(spec)
-    else:
-        tokenizer = Tokenizer.from_file(spec)
+    try:
+        if Path(spec).is_file():
+            tokenizer = Tokenizer.from_file(spec)
+        else:
+            tokenizer = Tokenizer.from_pretrained(spec)
+    except Exception as exc:
+        raise ConfigError(
+            f"failed to load tokenizer {spec!r}: {type(exc).__name__}: {exc}"
+        ) from exc
     return LocalTokenizer(tokenizer)

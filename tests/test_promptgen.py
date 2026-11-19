@@ -1,3 +1,9 @@
+import random
+import sys
+import types
+from pathlib import Path
+from typing import ClassVar
+
 import pytest
 
 from llmbench.config import ConfigError, WorkloadConfig
@@ -26,6 +32,35 @@ class WordTokenizer:
 
     def truncate(self, text: str, max_tokens: int) -> str:
         return " ".join(text.split()[:max_tokens])
+
+
+class NonRoundTripTokenizer:
+    @property
+    def is_tokenizer(self) -> bool:
+        return True
+
+    @property
+    def vocab_size(self) -> int:
+        return 100
+
+    def decode_ids(self, token_ids: list[int]) -> str:
+        return " ".join(f"a{token_id}" for token_id in token_ids)
+
+    def encode_ids(self, text: str) -> list[int]:
+        ids = [int(word[1:]) for word in text.split() if word.startswith("a")]
+        return ids + [0] if ids else []
+
+    def count(self, text: str) -> int:
+        return len(self.encode_ids(text))
+
+    def truncate(self, text: str, max_tokens: int) -> str:
+        return " ".join(text.split()[:max_tokens])
+
+
+def install_fake_tokenizers(monkeypatch: pytest.MonkeyPatch, tokenizer_class: type) -> None:
+    module = types.ModuleType("tokenizers")
+    module.Tokenizer = tokenizer_class  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "tokenizers", module)
 
 
 def test_prompt_is_deterministic_and_varies_by_request() -> None:
@@ -73,6 +108,43 @@ def test_prompt_set_changes_by_repeat() -> None:
     assert first.user != second.user
 
 
+def test_prompt_is_invariant_to_global_random_state() -> None:
+    workload = WorkloadConfig(
+        concurrencies=(1,), input_lengths=(48,), output_lengths=(4,), system_prompt="sys"
+    )
+    cell = build_cells(workload)[0]
+    tokenizer = WordTokenizer()
+    plain_first = generate_prompt(21, cell, 0, 2, workload, None)
+    tokenized_first = generate_prompt(21, cell, 0, 2, workload, tokenizer)
+
+    original_state = random.getstate()
+    try:
+        random.seed(999)
+        for _ in range(20):
+            random.random()
+
+        assert generate_prompt(21, cell, 0, 2, workload, None) == plain_first
+        assert generate_prompt(21, cell, 0, 2, workload, tokenizer) == tokenized_first
+    finally:
+        random.setstate(original_state)
+
+
+def test_non_round_trip_tokenizer_returns_best_effort_prompt() -> None:
+    workload = WorkloadConfig(concurrencies=(1,), input_lengths=(10,), output_lengths=(4,))
+    cell = build_cells(workload)[0]
+    tokenizer = NonRoundTripTokenizer()
+
+    first = generate_prompt(5, cell, 0, 1, workload, tokenizer)
+    second = generate_prompt(5, cell, 0, 1, workload, tokenizer)
+
+    actual_tokens = tokenizer.count(first.system) + len(tokenizer.encode_ids(first.user))
+    assert first == second
+    assert first.target_tokens == 10
+    assert actual_tokens == 11
+    assert first.estimated_tokens == actual_tokens
+    assert first.tokenizer_used is True
+
+
 def test_system_prompt_must_fit_in_content_token_budget() -> None:
     workload = WorkloadConfig(
         concurrencies=(1,), input_lengths=(2,), output_lengths=(4,), system_prompt="one two"
@@ -93,3 +165,73 @@ def test_completions_text_concatenates_system_and_user() -> None:
 
 def test_load_tokenizer_without_spec_returns_none() -> None:
     assert load_tokenizer(None) is None
+
+
+def test_load_tokenizer_uses_from_file_for_existing_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class RecordingTokenizer:
+        calls: ClassVar[list[tuple[str, str]]] = []
+
+        @classmethod
+        def from_file(cls, spec: str) -> object:
+            cls.calls.append(("file", spec))
+            return object()
+
+        @classmethod
+        def from_pretrained(cls, spec: str) -> object:
+            cls.calls.append(("pretrained", spec))
+            return object()
+
+    install_fake_tokenizers(monkeypatch, RecordingTokenizer)
+    spec = tmp_path / "tokenizer.model"
+    spec.write_text("{}", encoding="utf-8")
+
+    tokenizer = load_tokenizer(str(spec))
+
+    assert tokenizer is not None
+    assert tokenizer.is_tokenizer is True
+    assert RecordingTokenizer.calls == [("file", str(spec))]
+
+
+def test_load_tokenizer_uses_from_pretrained_for_non_file_spec(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RecordingTokenizer:
+        calls: ClassVar[list[tuple[str, str]]] = []
+
+        @classmethod
+        def from_file(cls, spec: str) -> object:
+            cls.calls.append(("file", spec))
+            return object()
+
+        @classmethod
+        def from_pretrained(cls, spec: str) -> object:
+            cls.calls.append(("pretrained", spec))
+            return object()
+
+    install_fake_tokenizers(monkeypatch, RecordingTokenizer)
+    spec = "missing-tokenizer.json"
+
+    tokenizer = load_tokenizer(spec)
+
+    assert tokenizer is not None
+    assert RecordingTokenizer.calls == [("pretrained", spec)]
+
+
+def test_load_tokenizer_wraps_loading_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class BrokenTokenizer:
+        @classmethod
+        def from_pretrained(cls, spec: str) -> object:
+            raise RuntimeError("bad tokenizer payload")
+
+    install_fake_tokenizers(monkeypatch, BrokenTokenizer)
+    spec = "broken/tokenizer"
+
+    with pytest.raises(ConfigError) as exc_info:
+        load_tokenizer(spec)
+
+    message = str(exc_info.value)
+    assert spec in message
+    assert "RuntimeError" in message
+    assert "bad tokenizer payload" in message

@@ -89,7 +89,7 @@ def generate_prompt(
             (offset + request_index + index) % vocab_size for index in range(remaining)
         ]
         user = tokenizer.decode_ids(token_ids)
-        for _ in range(5):
+        for _ in range(10):
             owned = tokenizer.encode_ids(user)
             if len(owned) == remaining:
                 break
