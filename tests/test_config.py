@@ -154,3 +154,13 @@ def test_completions_target_url_uses_backend_specific_endpoint(tmp_path: Path) -
     )
     config = load_config(write_config(tmp_path, text), environ={})
     assert target_url(config.targets[0]) == "http://127.0.0.1:8000/v1/completions"
+
+
+def test_huge_negative_integer_is_a_config_error(tmp_path: Path) -> None:
+    huge_negative = -(10**1000)
+    text = MINIMAL.replace(
+        "    model: test-model\n",
+        f"    model: test-model\n    timeout_s: {huge_negative}\n",
+    )
+    with pytest.raises(ConfigError, match="finite"):
+        load_config(write_config(tmp_path, text), environ={})

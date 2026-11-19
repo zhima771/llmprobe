@@ -107,8 +107,8 @@ def _number(value: Any, path: str, *, minimum: float) -> float:
     if (
         isinstance(value, bool)
         or not isinstance(value, (int, float))
-        or not math.isfinite(value)
         or value < minimum
+        or not math.isfinite(value)
     ):
         raise ConfigError(f"{path} must be a finite number >= {minimum}")
     return float(value)
