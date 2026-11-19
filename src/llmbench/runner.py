@@ -26,7 +26,7 @@ from llmbench.models import (
     make_run_id,
 )
 from llmbench.promptgen import generate_prompt
-from llmbench.tokenization import TextTokenizer, load_tokenizer
+from llmbench.tokenization import TextTokenizer, canonical_tokenizer_key, load_tokenizer
 from llmbench.workload import build_cells
 
 
@@ -62,32 +62,32 @@ def _effective_tokenizer_spec(config: AppConfig, target: TargetConfig) -> str | 
     return target.tokenizer if target.tokenizer is not None else config.workload.tokenizer
 
 
+def _tokenizer_cache_key(
+    config: AppConfig, target: TargetConfig, injected: TextTokenizer | None
+) -> str | None:
+    if target.tokenizer is None and injected is not None:
+        return "__injected__"
+    spec = _effective_tokenizer_spec(config, target)
+    return canonical_tokenizer_key(spec)
+
+
 def preflight_workload(
     config: AppConfig, tokenizer: TextTokenizer | None = None
 ) -> dict[str, TextTokenizer | None]:
     cells = build_cells(config.workload)
     minimum_cell = min(cells, key=lambda item: item.input_length)
-    if tokenizer is not None:
-        generate_prompt(
-            config.run.seed,
-            minimum_cell,
-            -1,
-            0,
-            config.workload,
-            tokenizer,
-        )
-        return {target.name: tokenizer for target in config.targets}
-
     tokenizers: dict[str, TextTokenizer | None] = {}
     cache: dict[str | None, TextTokenizer | None] = {}
-    validated: set[int] = set()
+    validated: set[str | None] = set()
     for target in config.targets:
-        spec = _effective_tokenizer_spec(config, target)
-        if spec not in cache:
-            cache[spec] = load_tokenizer(spec)
-        active_tokenizer = cache[spec]
+        cache_key = _tokenizer_cache_key(config, target, tokenizer)
+        if cache_key == "__injected__" and tokenizer is not None:
+            active_tokenizer: TextTokenizer | None = tokenizer
+        else:
+            if cache_key not in cache:
+                cache[cache_key] = load_tokenizer(_effective_tokenizer_spec(config, target))
+            active_tokenizer = cache[cache_key]
         tokenizers[target.name] = active_tokenizer
-        cache_key = id(active_tokenizer) if active_tokenizer is not None else 0
         if cache_key not in validated:
             generate_prompt(
                 config.run.seed,
@@ -182,13 +182,15 @@ class BenchmarkRunner:
                         self.progress.warning(f"target {target.name} disabled: {exc}")
 
                 for repeat in range(self.config.run.repeats):
-                    prompt_cache: dict[int, list[GeneratedPrompt]] = {}
+                    prompt_cache: dict[str | None, list[GeneratedPrompt]] = {}
                     for target in self.config.targets:
                         capability = self.capabilities[target.name]
                         if not capability.available:
                             continue
                         active_tokenizer = target_tokenizers[target.name]
-                        cache_key = id(active_tokenizer) if active_tokenizer is not None else 0
+                        cache_key = _tokenizer_cache_key(
+                            self.config, target, self._tokenizer
+                        )
                         if cache_key not in prompt_cache:
                             prompt_cache[cache_key] = [
                                 generate_prompt(

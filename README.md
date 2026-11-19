@@ -79,7 +79,7 @@ uv run llmbench run config.yaml
 
 - `base_url` 通常应包含 `/v1`；实际请求端点会在此后追加 `/chat/completions` 或 `/completions`。
 - `dataset: random` 是 v1 唯一支持的数据集，参考 vLLM benchmark random 数据集的思路：使用固定 seed、稳定 cell key 和请求序号生成确定性随机 prompt。
-- 有 tokenizer 时（tokenizer-backed）：从参考 tokenizer 词表生成确定性 token ID 序列，decode 为文本并尽力 re-encode 到目标内容 token 数；所有 target 收到相同文本。
+- 有 tokenizer 时（tokenizer-backed）：从 tokenizer 词表生成确定性 token ID 序列，decode 为文本并尽力 re-encode 到目标内容 token 数。使用相同有效 tokenizer 的 target 收到相同文本；不同 tokenizer 组会生成各自的目标长度 prompt。
 - 无 tokenizer 时（fallback approximation）：使用确定性随机词序列和约 4 字符/token 的启发式接近目标长度；没有服务端 usage 时通常无法得到输入 token 数。
 - `workload.tokenizer` 是全局参考 tokenizer；`targets[].tokenizer` 可覆盖它。tokenizer 只用于构造 prompt 和估算，实际输入/输出 token 数优先采用各服务的 usage，并记录 token count source 与 `estimated` 标记。
 - 使用内置别名时不需要复制模型权重；只需要 `tokenizer.json`。

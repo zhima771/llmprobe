@@ -736,3 +736,66 @@ def test_targets_with_different_tokenizers_get_distinct_prompts(
     assert seen["a"][1] is loaded["tokenizer-a"]
     assert seen["b"][1] is loaded["tokenizer-b"]
     assert seen["a"][0] != seen["b"][0]
+
+
+def test_equivalent_tokenizer_spellings_share_prompt_objects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tokenizer = MarkerTokenizer("x")
+    loaded_specs: list[str | None] = []
+    seen_prompts: dict[str, GeneratedPrompt] = {}
+
+    def fake_load(spec: str | None):
+        loaded_specs.append(spec)
+        return tokenizer
+
+    monkeypatch.setattr("llmbench.runner.load_tokenizer", fake_load)
+
+    async def fake_request(
+        client: Any,
+        target: TargetConfig,
+        prompt: GeneratedPrompt,
+        **kwargs: Any,
+    ) -> RequestResult:
+        seen_prompts[target.name] = prompt
+        return make_result(
+            target.name,
+            kwargs["cell"],
+            kwargs["repeat"],
+            kwargs["request_index"],
+        )
+
+    monkeypatch.setattr("llmbench.runner.stream_request", fake_request)
+    runner = BenchmarkRunner(
+        config(
+            tmp_path,
+            stream_options="none",
+            warmup_requests=0,
+            requests_per_cell=1,
+            target_tokenizers=("qwen3.6-35b", "bundled:qwen3.6-35b"),
+        ),
+        progress=NullProgress(),
+        environ={},
+    )
+    asyncio.run(runner.run())
+    assert loaded_specs == ["qwen3.6-35b"]
+    assert seen_prompts["a"] is seen_prompts["b"]
+
+
+def test_injected_tokenizer_still_honors_target_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    injected = MarkerTokenizer("i")
+    target_override = MarkerTokenizer("t")
+    monkeypatch.setattr(
+        "llmbench.runner.load_tokenizer",
+        lambda spec: target_override,
+    )
+    config_with_override = config(
+        tmp_path,
+        stream_options="none",
+        target_tokenizers=("target-spec", None),
+    )
+    mapping = preflight_workload(config_with_override, injected)
+    assert mapping["a"] is target_override
+    assert mapping["b"] is injected

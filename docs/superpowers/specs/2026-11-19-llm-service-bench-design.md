@@ -100,7 +100,7 @@ targets:
   - name: vllm-qwen
     backend: openai-chat
     base_url: http://127.0.0.1:8000/v1
-    model: Qwen/Qwen3-8B
+    model: Qwen/Qwen3.6-35B-A3B
     api_key_env: OPENAI_API_KEY
     tokenizer: qwen3.6-35b
     headers: {}
@@ -135,7 +135,7 @@ targets:
 - `output_lengths` 是生成 token 数上限。没有 tokenizer 时输入长度按确定性文本长度近似；所有实际 token 数优先采用服务端 usage，并记录来源。
 - `workload.tokenizer` 是全局参考 tokenizer，可指向内置别名、本地 `tokenizer.json`、包含 `tokenizer.json` 的模型目录，或 HF repo id。默认安装不强制引入 tokenizer 依赖，缺省时使用内置的确定性文本生成器。
 - `targets[].tokenizer` 可覆盖全局 tokenizer。相同 tokenizer 的 target 共享同一组 prompt；不同 tokenizer 的 target 各自生成目标 token 长度的 prompt，使不同模型的输入 token 长度更准确。实际 token 数仍以服务端 usage 为准。
-- 内置 tokenizer 位于 `src/llmbench/tokenizers/`，提供 `qwen3.8-flash-next`、`qwen3.6-35b`、`deepseek-v4.1-flash`、`glm-5.3` 别名；来源和 SHA256 记录在 `manifest.json`。
+- 内置 tokenizer 位于 `src/llmbench/tokenizers/`，提供 `qwen3.8-flash-next`、`qwen3.6-35b`、`deepseek-v4.1-flash`、`glm-5.3` 别名；来源、源提交、SHA256、许可证和直接文件 URL 记录在 `manifest.json`，许可证文本随包分发。
 - `max_tokens_field` 是 target 级配置，支持 `max_tokens` 和 `max_completion_tokens`，默认 `max_tokens` 以获得更广的兼容性。这样同一矩阵可以公平比较使用不同字段的官方 API。
 - `stream_options: auto` 先尝试 `stream_options.include_usage=true` 获取精确 token 数。能力探测在正式测量前通过一个被排除的 probe/warmup 请求完成；若服务明确不支持该参数，则去掉该字段重试并记住该 target 的能力。正式测量不会因探测而重复。
 - `request_params` 原样合并进请求体，用于 `temperature`、`top_p`、`ignore_eos` 等厂商扩展。保留字段 `model`、`messages`、`prompt`、`stream`、`stream_options`、`max_tokens`、`max_completion_tokens` 不允许覆盖，配置校验时报错；生成长度只通过 `max_tokens_field` 控制。
@@ -180,12 +180,12 @@ for cell in cells:
 
 ### 6.3 Prompt 生成（vLLM 风格 random 数据集）
 
-`dataset: random` 使用与 vLLM bench random 数据集相同的思路：用固定 seed 从 tokenizer 词表生成确定性 token ID 序列，再 decode 为文本后发送。所有目标服务收到完全相同的文本，实际 token 数用各服务的 usage 校正。
+`dataset: random` 使用与 vLLM bench random 数据集相同的思路：用固定 seed 从 tokenizer 词表生成确定性 token ID 序列，再 decode 为文本后发送。使用相同有效 tokenizer 的 target 收到完全相同的文本；不同 tokenizer 的 target 各自生成目标 token 长度的 prompt。实际 token 数用各服务的 usage 校正。
 
 同一 cell 内：
 
 - 使用全局 `seed` 和稳定 cell key 生成确定性 prompt 集。
-- 同一 cell 的 prompt 集跨 target 完全一致，保证公平比较。
+- 同一 cell 内，使用相同有效 tokenizer 的 target 共享完全一致的 prompt 集；不同 tokenizer 组分别生成 prompt，以对齐各自的目标 token 长度。
 - 每个请求内容不同，降低 prefix cache 命中导致的偏差。
 - 不同 repeat 使用不同 prompt 集，避免跨轮 cache 复用。
 - warmup 使用单独的 prompt 集。
